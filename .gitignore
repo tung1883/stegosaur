@@ -1,0 +1,11 @@
+/target
+**/target
+node_modules/
+*.log
+.env
+.env.*
+# Tauri generated
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/target/
+.DS_Store
+Thumbs.db

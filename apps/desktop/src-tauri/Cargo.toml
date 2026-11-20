@@ -1,0 +1,13 @@
+[package]
+name = "stegosaur-desktop"
+version = "0.1.0"
+edition = "2024"
+description = "Desktop app for Stegosaur"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+stegosaur-desktop-core = { path = "../core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"

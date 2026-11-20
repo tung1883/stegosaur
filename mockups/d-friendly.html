@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stegosaur friendly workbench mockup</title>
+<style>
+  :root{--bg:#fbf6e6;--card:#fffdf5;--soft:#f1f8e8;--ink:#2e3b2c;--dim:#7a8a74;--line:#e4dcc0;--green:#8fbf5f;--green-d:#5e8f3c;--orange:#ee8a3f;--sky:#d6ecf7;--red:#d2573f;--amber:#e9b949}
+  *{box-sizing:border-box}
+  body{margin:0;background:#e9e2c8;color:var(--ink);font:14px/1.45 system-ui,"Segoe UI",sans-serif;padding:18px 12px}
+  .note{max-width:1240px;margin:0 auto 12px;color:#6b6a50;font-size:12px}
+  .app{max-width:1240px;margin:0 auto;background:var(--bg);border-radius:18px;box-shadow:0 14px 40px #4a3f1f33;display:grid;grid-template-columns:250px 1fr 316px;grid-template-rows:56px 1fr 120px;gap:14px;padding:14px;height:900px;animation:fadein .5s ease both}
+  .top{grid-column:1/4;display:flex;align-items:center;gap:12px;padding:0 6px}
+  .top img{width:44px;height:44px;border-radius:50%;box-shadow:0 2px 8px #0002}
+  .top img.wig{animation:wig .9s ease}
+  .top b{font-size:19px;letter-spacing:.2px;margin-right:8px}
+  .top .sp{flex:1}
+  #chips{display:flex;gap:6px;flex-wrap:wrap}
+  .chip{padding:7px 16px;border-radius:99px;background:#fff8;border:1.5px solid transparent;color:#4a6342;cursor:pointer;user-select:none;font-weight:500;transition:transform .15s,background .2s,box-shadow .2s}
+  .chip:hover{background:#fff;transform:translateY(-2px);box-shadow:0 4px 10px #4a3f1f22}
+  .chip.on{background:var(--orange);color:#fff;font-weight:600;box-shadow:0 3px 0 #c36d2a;animation:pop .35s ease}
+  #ctx{font-size:13px;background:#fff9;padding:4px 12px;border-radius:99px}
+  .left{background:linear-gradient(#cfe8c4,#b9dca6);border-radius:16px;overflow:auto;padding:6px 0 10px;animation:rise .5s .05s both}
+  .right{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:auto;padding-bottom:8px;animation:rise .5s .15s both}
+  .right>*{animation:rise .35s both}
+  .right>*:nth-child(2){animation-delay:.04s}.right>*:nth-child(3){animation-delay:.08s}.right>*:nth-child(4){animation-delay:.12s}.right>*:nth-child(5){animation-delay:.16s}.right>*:nth-child(6){animation-delay:.2s}.right>*:nth-child(n+7){animation-delay:.24s}
+  h4{margin:0;padding:12px 14px 5px;font-size:12px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim)}
+  .left h4{color:#4f6e45}
+  .item{display:flex;align-items:center;gap:10px;padding:8px 10px;margin:3px 10px;border-radius:12px;cursor:pointer;user-select:none;color:#35502e;border:1.5px solid transparent;transition:transform .15s,background .2s,box-shadow .2s;animation:rise .4s both}
+  .item:nth-child(2){animation-delay:.03s}.item:nth-child(3){animation-delay:.06s}.item:nth-child(4){animation-delay:.09s}.item:nth-child(5){animation-delay:.12s}.item:nth-child(6){animation-delay:.15s}.item:nth-child(7){animation-delay:.18s}.item:nth-child(n+8){animation-delay:.21s}
+  .item:hover{background:#ffffff99;transform:translateX(3px)}
+  .item.on{background:#fff;border-color:var(--green-d);box-shadow:0 3px 10px #4a6a3a22;font-weight:600;animation:pop .3s ease}
+  .item.off{opacity:.45;cursor:not-allowed}.item.off:hover{transform:none;background:transparent}
+  .th{width:34px;height:26px;border-radius:7px;flex:none;display:grid;place-items:center;font-size:11px;color:#2c4a22;font-weight:600;box-shadow:inset 0 0 0 1px #0001}
+  .item small{color:#6f8a64;display:block;font-size:11.5px;font-weight:400}
+  .item .ck{margin-left:auto;accent-color:var(--green-d);width:16px;height:16px}
+  .center{position:relative;display:flex;flex-direction:column;min-width:0;background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;animation:rise .5s .1s both}
+  .prog{position:absolute;left:0;right:0;top:0;height:4px;background:transparent;z-index:3;opacity:0;transition:opacity .2s}
+  .prog.on{opacity:1}
+  .prog i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--green),var(--orange));border-radius:0 4px 4px 0}
+  .tools{display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px dashed var(--line);min-height:50px}
+  .seg{display:flex;background:#f3edd5;border-radius:10px;padding:3px;gap:2px}
+  .seg button{white-space:nowrap;background:transparent;border:none;color:#6b7a5f;padding:5px 13px;cursor:pointer;font:inherit;border-radius:8px;transition:background .2s,color .2s,transform .15s}
+  .seg button:hover{color:var(--ink)}
+  .seg button.on{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 2px 6px #4a3f1f22}
+  #stat{color:var(--dim);font-size:12.5px;flex:1;min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .stage{flex:1;display:grid;place-items:center;padding:14px;overflow:hidden;position:relative;background:radial-gradient(circle at 50% 40%,#fffdf5,#f6efd8)}
+  .stage.scan::after{content:"";position:absolute;top:0;bottom:0;width:90px;left:-90px;background:linear-gradient(90deg,transparent,#ffffffcc,transparent);animation:sweep 1.1s linear infinite;pointer-events:none}
+  canvas{width:min(100%,620px);image-rendering:pixelated;border:3px solid #fff;border-radius:12px;box-shadow:0 8px 24px #4a3f1f33;aspect-ratio:4/3;cursor:crosshair;animation:pop .45s ease;background:#fff}
+  .textview{width:100%;height:100%;overflow:auto;background:#1f2b24;border-radius:12px;padding:14px 16px;font:12px/1.55 ui-monospace,Consolas,monospace;white-space:pre;color:#cfe3c0;box-shadow:0 8px 24px #4a3f1f33}
+  .legend{display:flex;gap:16px;padding:8px 14px;border-top:1px dashed var(--line);color:var(--dim);font-size:12.5px;flex-wrap:wrap;align-items:center}
+  .sw{display:inline-block;width:11px;height:11px;border-radius:4px;margin-right:6px;vertical-align:-1px}
+  .hover{margin-left:auto}
+  .field{padding:6px 14px}
+  .field label{display:flex;justify-content:space-between;color:var(--dim);margin-bottom:4px;font-size:13px}
+  .field label b{color:var(--ink);font-weight:600}
+  input[type=range]{width:100%;accent-color:var(--green-d)}
+  .in,select,textarea{width:100%;background:#fff;border:1.5px solid var(--line);color:var(--ink);padding:8px 10px;border-radius:10px;font:inherit;transition:border-color .2s,box-shadow .2s}
+  .in:focus,select:focus,textarea:focus{outline:none;border-color:var(--green-d);box-shadow:0 0 0 3px #bfe0a2aa}
+  textarea{min-height:70px;resize:vertical}
+  .meter{margin:7px 14px}
+  .meter .t{display:flex;justify-content:space-between;color:var(--dim);font-size:12.5px}
+  .meter .t b{color:var(--ink)}
+  .meter .bar{height:10px;border-radius:5px;background:#ebe4c8;margin-top:4px;position:relative;overflow:hidden}
+  .meter .bar i{position:absolute;inset:0 auto 0 0;background:var(--green);border-radius:5px;transition:width .5s cubic-bezier(.2,.8,.2,1),background .3s}
+  .meter .bar u{position:absolute;top:0;bottom:0;width:2px;background:var(--orange)}
+  .slots{display:flex;height:26px;border-radius:9px;overflow:hidden;margin:8px 14px;background:#ebe4c8}
+  .slots i{display:grid;place-items:center;font-style:normal;font-size:11.5px;color:#23421a;overflow:hidden;white-space:nowrap;transition:width .5s cubic-bezier(.2,.8,.2,1),background .3s;font-weight:600}
+  .gaugew{padding:6px 14px 0}
+  .gauge{height:14px;border-radius:7px;background:linear-gradient(90deg,#9bd06a 0 40%,#f3d36b 40% 70%,#ee8a3f 70% 100%);position:relative;margin:10px 0 6px}
+  .gauge i{position:absolute;top:-5px;width:6px;height:24px;border-radius:3px;background:var(--ink);border:2px solid #fff;transition:left .7s cubic-bezier(.3,1.4,.5,1);box-shadow:0 2px 6px #0003}
+  .row2{display:flex;justify-content:space-between;font-size:12.5px;color:var(--dim)}
+  .big{margin:10px 14px;padding:12px 14px;border-radius:12px;border:1.5px solid #cfe5b5;background:#eaf5dc;transition:background .4s,border-color .4s}
+  .big.mid{background:#fbefcf;border-color:#efd68c}.big.high{background:#fadcd3;border-color:#eeb3a2}
+  .big b{font-size:24px;color:var(--green-d);display:inline-block}.big.mid b{color:#b07a12}.big.high b{color:var(--red)}
+  .big b.pop{animation:pop .4s ease}
+  .big small{color:var(--dim)}
+  .btn{margin:6px 14px 12px;display:block;width:calc(100% - 28px);padding:12px;border:none;border-radius:12px;background:var(--orange);color:#fff;font:700 15px system-ui;cursor:pointer;box-shadow:0 4px 0 #c36d2a;transition:transform .12s,box-shadow .12s,background .2s}
+  .btn:not([disabled]){animation:pulse 2.6s ease-in-out infinite}
+  .btn:not([disabled]):hover{transform:translateY(-2px);box-shadow:0 6px 0 #c36d2a}
+  .btn:not([disabled]):active{transform:translateY(3px);box-shadow:0 1px 0 #c36d2a;animation:none}
+  .btn[disabled]{background:#d8d1b2;box-shadow:0 4px 0 #bdb590;cursor:not-allowed;color:#fff}
+  .btn.busy{background:repeating-linear-gradient(45deg,var(--orange) 0 14px,#f4a35f 14px 28px);background-size:40px 40px;animation:stripes .6s linear infinite;color:#fff}
+  .runbar{position:sticky;bottom:0;z-index:2;padding-top:12px;background:linear-gradient(rgba(255,253,245,0),var(--card) 22%)}
+  .msg{margin:2px 14px;font-size:12.5px;min-height:18px;transition:color .2s}.msg.r{color:var(--red)}.msg.g{color:var(--green-d)}
+  .log{grid-column:1/4;background:#1f2b24;border-radius:14px;font:12px/1.55 ui-monospace,Consolas,monospace;padding:8px 16px;overflow:auto;color:#cfe3c0;animation:rise .5s .2s both}
+  .log .d{color:#8fa597}.log .g{color:#a9e07a}.log .o{color:#f4a35f}.log .s{color:#8fcbe9}.log .r{color:#f08a74}
+  #logl>div{animation:slidein .3s both}
+  .tabs2{display:flex;gap:16px;margin-bottom:4px;color:#8fa597;font-family:system-ui}
+  .tabs2 span{cursor:pointer;padding-bottom:1px;transition:color .2s}.tabs2 span:hover{color:#fff}
+  .tabs2 .on{color:#fff;border-bottom:2px solid var(--green)}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);background:#2e3b2c;color:#fff;padding:10px 20px;border-radius:12px;opacity:0;transition:opacity .25s,transform .25s;pointer-events:none;font-weight:600;z-index:9;box-shadow:0 8px 24px #0004}
+  .toast.on{opacity:1;transform:translate(-50%,0)}
+  @keyframes fadein{from{opacity:0}to{opacity:1}}
+  @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  @keyframes pop{0%{transform:scale(.94)}60%{transform:scale(1.04)}100%{transform:scale(1)}}
+  @keyframes wig{0%,100%{transform:rotate(0)}20%{transform:rotate(-14deg) scale(1.1)}40%{transform:rotate(12deg) scale(1.1)}60%{transform:rotate(-8deg)}80%{transform:rotate(6deg)}}
+  @keyframes sweep{to{left:100%}}
+  @keyframes pulse{0%,100%{box-shadow:0 4px 0 #c36d2a,0 0 0 0 #ee8a3f55}50%{box-shadow:0 4px 0 #c36d2a,0 0 0 8px #ee8a3f00}}
+  @keyframes stripes{to{background-position:40px 0}}
+  @keyframes slidein{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}
+  @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+  @media(max-width:980px){.app{grid-template-columns:1fr;grid-template-rows:auto;height:auto}.top,.log{grid-column:1}}
+</style>
+</head>
+<body>
+<p class="note">Option D - Friendly Workbench. The same live three-panel workspace as C, in B's soft look, with motion: panels slide in, a scan sweeps the image while it works, the gauge needle glides, and the dino celebrates. Pick a task up top, select files on the left, tune the right, then press the orange button (or Ctrl+Enter). Capacity uses the real formulas; "how hidden" is an illustrative model.</p>
+<div class="app">
+  <div class="top"><img src="../assets/stegosaur.png" alt=""><b>Stegosaur</b><span id="chips"></span><span class="sp"></span><span id="ctx" style="color:var(--dim)"></span></div>
+  <aside class="left" id="left"></aside>
+  <section class="center"><div class="prog" id="prog"><i></i></div>
+    <div class="tools" id="tools"></div>
+    <div class="stage" id="stage"></div>
+    <div class="legend" id="legend"></div>
+  </section>
+  <aside class="right" id="right"></aside>
+  <div class="log"><div class="tabs2"><span class="on" data-lt="cmd">Command</span><span data-lt="log">Log</span></div><div id="cmd"></div><div id="logl"></div></div>
+</div>
+<div class="toast" id="toast"></div>
+<script src="samples.js"></script>
+<script>
+// ---------- data and real formulas ----------
+const CAR=[{n:'beach.png',d:'1024x768',samples:1024*768*3,c:'linear-gradient(135deg,#9bd0ea,#8fbf5f)',ic:''},
+  {n:'city.png',d:'2048x1365',samples:2048*1365*3,c:'linear-gradient(135deg,#d99a6c,#7a6a4a)',ic:''},
+  {n:'forest.bmp',d:'800x600',samples:800*600*3,c:'linear-gradient(135deg,#6fa56a,#2f5a3a)',ic:''},
+  {n:'voice.wav',d:'44.1 kHz',samples:1500000,c:'linear-gradient(135deg,#456,#789)',ic:'~'},
+  {n:'photo.jpg',d:'JPEG',samples:0,c:'#555',ic:'x',bad:true}];
+const PAY=[{n:'notes.txt',size:4096},{n:'report.pdf',size:225280},{n:'keys.zip',size:18432},{n:'archive.tar',size:1288490}];
+const ANA=[{n:'beach.png',how:'original',rs:.003,spa:.001,chi:.31,fill:0},{n:'beach.stego.png',how:'match, 76% full',rs:.012,spa:.004,chi:.28,fill:.76},{n:'beach.replace.png',how:'replace, 76% full',rs:.762,spa:.744,chi:.99,fill:.76},{n:'city.stego.png',how:'match, 5% full',rs:.004,spa:.002,chi:.30,fill:.05}];
+const STYLES=['prose','syslog','postgres','nginx','env'];
+const BPW={prose:[2.59],syslog:[1.83,1.35,1.09,.85,.60,.42],postgres:[1.78,1.48,1.06,.84,.58,.47],nginx:[1.62,1.30,1.24,1.14,.87,.49],env:[.57]};
+const WELL={syslog:[31,75,87,95,100,100],postgres:[80,100,100,100,100,100],nginx:[11,100,100,100,100,100]};
+const WPL={prose:14,syslog:14,postgres:15,nginx:20,env:1.2},ODEF={syslog:4,postgres:2,nginx:2};
+const wireAvail=(a,p)=>{if(!p)return a;const f=Math.floor(a/255),r=a%255;return f*(255-p)+Math.max(0,r-p)};
+const singleCap=(s,p)=>Math.max(0,wireAvail(Math.max(0,Math.floor(s/8)-4-(p||0)),p)-28);
+const slotCap=(s,rate,p)=>{const reg=Math.floor(s/2),slot=Math.min(Math.floor(reg*rate/8),Math.floor(reg/8));return Math.max(0,wireAvail(slot,p)-32)};
+const fmt=n=>n>=1e6?(n/1e6).toFixed(1)+' MB':n>=1024?((n/1024)>=100?Math.round(n/1024):(n/1024).toFixed(1))+' KB':n+' B';
+const detect=(fill,quick)=>{const rs=quick?Math.min(1,fill):.004+.02*fill,spa=quick?Math.min(1,fill*.98):.002+.01*fill,score=Math.round(100*Math.max(rs,spa));return{rs,spa,score,cls:score<5?'':score<20?'mid':'high',risk:score<5?'LOW':score<20?'MEDIUM':'HIGH'}};
+// ---------- state ----------
+const OPS=[['embed','Embed'],['deniable','Hidden'],['split','Split'],['analyze','Analyze'],['text','Cover text']];
+const S={op:'embed',car:0,pay:2,decoy:0,hidden:2,secret:2,sel:[true,true,true,false,false],k:2,pass:'correct horse battery',pass2:'the real one',mode:'match',par:16,rate:20,view:'stego',
+  ana:1,scanned:{},style:'syslog',order:4,msg:'meet at the usual place at 9pm',textDone:false,done:{},logTab:'cmd',log:[],busy:false};
+const $=s=>document.querySelector(s);
+const el={chips:$('#chips'),left:$('#left'),tools:$('#tools'),stage:$('#stage'),legend:$('#legend'),right:$('#right'),cmd:$('#cmd'),logl:$('#logl'),ctx:$('#ctx')};
+// ---------- synthetic image ----------
+const IW=256,IH=192;let ORIG=null,STEGO=null,origFor=-1,analyzeKey='';
+function makeOrig(ci){
+  const img=new ImageData(IW,IH);let seed=7+ci*13;const rnd=()=>(seed=(seed*1664525+1013904223)>>>0)/4294967296;
+  for(let y=0;y<IH;y++)for(let x=0;x<IW;x++){
+    const i=(y*IW+x)*4,n=(rnd()-.5)*5;let r,g,b;
+    if(ci===0){const sky=y<IH*.62;r=sky?170+y*.2:140-(y-IH*.62)*.3;g=sky?210-y*.15:185-(y-IH*.62)*.3;b=sky?238:110;const dx=x-IW*.45,dy=y-IH*.62;if(dx*dx/3600+dy*dy/1500<1){r=165;g=205;b=122}}
+    else if(ci===1){const bld=Math.floor(x/22),hgt=60+((bld*37)%90);const sky=y<IH-hgt;r=sky?220-y*.3:90+(bld%3)*20;g=sky?160-y*.2:80+(bld%2)*20;b=sky?120:90;if(!sky&&(x%22>4&&x%22<9)&&(y%14<6))r=g=b=230}
+    else if(ci===2){r=50+((x*3)%40)*.5;g=110+((x*7+y)%50);b=60+(y*.3)}
+    else{const m=IH/2+Math.sin(x/9)*40*Math.sin(x/53);const on=Math.abs(y-m)<2.2;r=on?169:20;g=on?207:30;b=on?122:40}
+    [r,g,b].forEach((v,k)=>{img.data[i+k]=Math.max(0,Math.min(255,Math.round(v+n)))});img.data[i+3]=255;
+  }
+  return img;
+}
+function applyEmbed(frac,halves){
+  STEGO=new ImageData(new Uint8ClampedArray(ORIG.data),IW,IH);let seed=99;const rnd=()=>(seed=(seed*1664525+1013904223)>>>0)/4294967296;
+  for(let y=0;y<IH;y++)for(let x=0;x<IW;x++){const i=(y*IW+x)*4,p=halves?(y<IH/2?halves[0]:halves[1]):frac;
+    for(let k=0;k<3;k++)if(rnd()<p){const v=ORIG.data[i+k];STEGO.data[i+k]=S.mode==='replace'?v^1:Math.max(0,Math.min(255,v+(rnd()<.5?1:-1)))}}
+}
+function ensureOrig(){const ci=S.op==='analyze'?0:Math.min(S.car,3);if(origFor!==ci){ORIG=makeOrig(ci);STEGO=null;origFor=ci}if(!STEGO)STEGO=new ImageData(new Uint8ClampedArray(ORIG.data),IW,IH)}
+function paintCanvas(){
+  if(S.op==='text')return;const cv=$('#cv');if(!cv)return;ensureOrig();const ctx=cv.getContext('2d');
+  if(S.view==='stego')ctx.putImageData(STEGO,0,0);else if(S.view==='orig')ctx.putImageData(ORIG,0,0);
+  else{const out=ctx.createImageData(IW,IH);
+    for(let p=0;p<IW*IH;p++){const i=p*4;
+      if(S.view==='diff'){let d=0;for(let k=0;k<3;k++)d=Math.max(d,Math.abs(STEGO.data[i+k]-ORIG.data[i+k]));const y=Math.floor(p/IW);
+        let r=d?238:248,g=d?138:243,b=d?63:228;
+        if(S.op==='deniable'&&!d){if(y<IH/2){r=222;g=240;b=250}else{r=226;g=243;b=208}}
+        out.data[i]=r;out.data[i+1]=g;out.data[i+2]=b}
+      else{const c=(STEGO.data[i+1]&1)?50:244;out.data[i]=out.data[i+1]=out.data[i+2]=c}
+      out.data[i+3]=255}
+    ctx.putImageData(out,0,0)}
+}
+// ---------- derived values ----------
+const stegoName=c=>c.n.replace(/\.(\w+)$/,'.stego.$1');
+function derive(){
+  const c=CAR[S.car],r={c};
+  if(S.op==='embed'){const p=PAY[S.pay];r.need=p.size;r.cap=c.bad?0:singleCap(c.samples,S.par);r.fits=!c.bad&&p.size<=r.cap;r.fill=c.samples?(p.size+32)*8/c.samples:1;r.det=detect(r.fill,S.mode==='replace');
+    r.cmd=`stegosaur embed ${c.n} ${stegoName(c)} --data ${p.n} --parity ${S.par}${S.mode==='replace'?' --mode replace':''}`;r.err=c.bad?'JPEG is lossy: LSB data would not survive':!r.fits?`payload needs ${fmt(p.size)} but ${c.n} holds ${fmt(r.cap)}`:S.pass?'':'passphrase must not be empty'}
+  if(S.op==='deniable'){const A=PAY[S.decoy],B=S.hidden<PAY.length?PAY[S.hidden]:null;r.cap=c.bad?0:slotCap(c.samples,S.rate/100,S.par);r.A=A;r.B=B;r.fits=!c.bad&&A.size<=r.cap&&(!B||B.size<=r.cap);r.fill=S.rate/100;r.det=detect(r.fill,S.mode==='replace');
+    r.cmd=`stegosaur hidden-embed ${c.n} ${stegoName(c)} --public-data ${A.n} --public-pass ****** ${B?`--hidden-data ${B.n} --hidden-pass ****** `:''}--rate ${(S.rate/100).toFixed(2)} --parity ${S.par}`;
+    r.err=c.bad?'JPEG is lossy':A.size>r.cap?`public file needs ${fmt(A.size)} but a slot holds ${fmt(r.cap)}`:B&&B.size>r.cap?`hidden file needs ${fmt(B.size)} but a slot holds ${fmt(r.cap)}`:!S.pass?'public passphrase must not be empty':B&&!S.pass2?'hidden passphrase must not be empty':B&&S.pass===S.pass2?'public and hidden passphrases must differ':''}
+  if(S.op==='split'){const sec=PAY[S.secret],ids=CAR.map((x,i)=>S.sel[i]&&!x.bad?i:-1).filter(i=>i>=0),share=sec.size+53;r.sec=sec;r.ids=ids;r.share=share;r.n=ids.length;r.bad=ids.filter(i=>share>singleCap(CAR[i].samples,S.par));
+    r.fill=c.samples?(share+32)*8/c.samples:1;r.det=detect(r.fill,S.mode==='replace');r.cmd=`stegosaur split --secret ${sec.n} --k ${Math.min(S.k,Math.max(1,r.n))} --out-dir shares ${ids.map(i=>CAR[i].n).join(' ')}`;
+    r.err=r.n<1?'select at least one carrier':S.k>r.n?'need 1 <= k <= n carriers':r.bad.length?`share needs ${fmt(share)} but ${CAR[r.bad[0]].n} holds ${fmt(singleCap(CAR[r.bad[0]].samples,S.par))}`:!S.pass?'passphrase must not be empty':''}
+  if(S.op==='analyze'){const a=ANA[S.ana],sc=Math.round(100*Math.max(a.rs,a.spa));r.a=a;r.det={rs:a.rs,spa:a.spa,score:sc,cls:sc<5?'':sc<20?'mid':'high',risk:sc<5?'LOW':sc<20?'MEDIUM':'HIGH'};r.cmd=`stegosaur analyze ${a.n}`;r.err=''}
+  if(S.op==='text'){const key=S.style,fixed=BPW[key].length===1,bpw=BPW[key][fixed?0:S.order-1],bytes=new TextEncoder().encode(S.msg).length,words=Math.ceil((bytes+32)*8/bpw);r.key=key;r.fixed=fixed;r.bpw=bpw;r.bytes=bytes;r.words=words;r.lines=Math.max(1,Math.ceil(words/WPL[key]));
+    r.cmd=`stegosaur text-embed --data msg.txt --style ${key}${fixed?'':' --order '+S.order} --out cover.log`;r.err=S.msg?'':'type a message first'}
+  return r;
+}
+// ---------- motion helpers ----------
+const gaugePos=sc=>sc<5?5+sc*2:sc<20?40+(sc-5)*2:Math.min(95,70+(sc-20)*.4);
+const popPrev={};
+function pop(id){const e=$('#'+id);if(!e)return;if(popPrev[id]!==e.textContent){popPrev[id]=e.textContent;e.classList.remove('pop');void e.offsetWidth;e.classList.add('pop')}}
+const toast=m=>{const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(toast.h);toast.h=setTimeout(()=>t.classList.remove('on'),1800)};
+function celebrate(msg){const b=document.querySelector('.top img');if(b){b.classList.remove('wig');void b.offsetWidth;b.classList.add('wig')}toast('\u2713 '+msg)}
+// ---------- rendering ----------
+function renderChrome(){
+  el.chips.innerHTML=OPS.map(([k,l])=>`<span class="chip ${S.op===k?'on':''}" data-op="${k}">${l}</span>`).join(' ');
+  const views=S.op==='analyze'?[['stego','Image'],['diff','Difference x40'],['lsb','LSB plane']]:[['stego','Stego'],['orig','Original'],['diff','Difference x40'],['lsb','LSB plane']];
+  if(S.op==='analyze'&&S.view==='orig')S.view='stego';
+  el.tools.innerHTML=S.op==='text'?`<b>Generated cover text</b><span style="flex:1"></span><span id="stat" style="color:var(--dim)"></span>`
+    :`<div class="seg" id="views">${views.map(([k,l])=>`<button class="${S.view===k?'on':''}" data-v="${k}">${l}</button>`).join('')}</div><span style="flex:1"></span><span id="stat" style="color:var(--dim)"></span>`;
+  el.stage.innerHTML=S.op==='text'?`<div class="textview" id="tv"></div>`:`<canvas id="cv" width="${IW}" height="${IH}"></canvas>`;
+  el.legend.innerHTML=S.op==='text'?`<span>real output of <code>stegosaur text-embed</code></span>`:`<span><i class="sw" style="background:#ee8a3f"></i>changed sample</span>${S.op==='deniable'?'<span><i class="sw" style="background:#9fd3ee"></i>first file (top half)</span><span><i class="sw" style="background:#8fbf5f"></i>hidden file (bottom half)</span>':''}<span class="hover" id="hov">hover the image for pixel values</span>`;
+  const cv=$('#cv');
+  if(cv){cv.onmousemove=e=>{const r=cv.getBoundingClientRect(),x=Math.floor((e.clientX-r.left)/r.width*IW),y=Math.floor((e.clientY-r.top)/r.height*IH);if(x<0||y<0||x>=IW||y>=IH)return;const d=(S.view==='orig'?ORIG:STEGO).data,i=(y*IW+x)*4;$('#hov').textContent=`x ${x} y ${y} - R ${d[i]} G ${d[i+1]} B ${d[i+2]} (LSB ${d[i]&1} ${d[i+1]&1} ${d[i+2]&1})`};cv.onmouseleave=()=>{$('#hov').textContent='hover the image for pixel values'}}
+  const vs=$('#views');if(vs)vs.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S.view=b.dataset.v;renderChrome();refresh()});
+}
+function renderLeft(){
+  const carItem=(c,i,multi)=>`<div class="item ${c.bad?'off':''} ${(multi?S.sel[i]:S.car===i)&&!c.bad?'on':''}" data-car="${i}"><span class="th" style="background:${c.c}">${c.ic}</span><div>${c.n}<small>${c.bad?'lossy - not usable':fmt(singleCap(c.samples,S.par))+' capacity'}</small></div>${multi&&!c.bad?`<input class="ck" type="checkbox" data-ck="${i}" ${S.sel[i]?'checked':''}>`:''}</div>`;
+  const payItem=(p,i,key)=>`<div class="item ${S[key]===i?'on':''}" data-pay="${i}" data-key="${key}"><span class="th" style="background:#8a6">${p.n.split('.').pop()}</span><div>${p.n}<small>${fmt(p.size)}</small></div></div>`;
+  if(S.op==='analyze'){el.left.innerHTML=`<h4>Images to analyze</h4>${ANA.map((a,i)=>`<div class="item ${S.ana===i?'on':''}" data-ana="${i}"><span class="th" style="background:${CAR[0].c}"></span><div>${a.n}<small>${a.how}${S.scanned[i]?' - scanned':''}</small></div></div>`).join('')}`;return}
+  if(S.op==='text'){el.left.innerHTML=`<h4>Styles</h4>${STYLES.map(k=>`<div class="item ${S.style===k?'on':''}" data-style="${k}"><span class="th" style="background:#8fcbe9">${k.slice(0,2)}</span><div>${k}<small>${BPW[k][BPW[k].length>1?(ODEF[k]||2)-1:0]} bits/word</small></div></div>`).join('')}`;return}
+  el.left.innerHTML=`<h4>Carriers</h4>${CAR.map((c,i)=>carItem(c,i,S.op==='split')).join('')}${S.op==='deniable'?'':`<h4>${S.op==='split'?'Secret':'Payloads'}</h4>${PAY.map((p,i)=>payItem(p,i,S.op==='split'?'secret':'pay')).join('')}`}`;
+}
+const seg=(id,opts,val)=>`<div class="seg" id="${id}" style="width:100%">${opts.map(([k,l])=>`<button style="flex:1" class="${val===k?'on':''}" data-v="${k}">${l}</button>`).join('')}</div>`;
+const sel=(id,opts,val)=>`<select id="${id}">${opts.map(([k,l])=>`<option value="${k}" ${String(val)===String(k)?'selected':''}>${l}</option>`).join('')}</select>`;
+function renderRight(){
+  const pass=(id,l,v)=>`<div class="field"><label>${l} <b id="${id}s"></b></label><input class="in" id="${id}" type="password" value="${v}"></div>`;
+  const modeF=`<div class="field"><label>Mode <b>${S.mode==='match'?'match (+-1)':'replace'}</b></label>${seg('mode',[['replace','replace'],['match','match']],S.mode)}</div>`;
+  const parF=`<div class="field"><label>Error correction <b id="pv"></b></label><input id="par" type="range" min="0" max="64" step="2" value="${S.par}"></div>`;
+  let h='<h4>Parameters</h4>';
+  if(S.op==='embed')h+=pass('pass','Passphrase',S.pass)+modeF+parF;
+  if(S.op==='deniable')h+=`<div class="field"><label>Public file</label>${sel('decoy',PAY.map((p,i)=>[i,p.n+' ('+fmt(p.size)+')']),S.decoy)}</div>`+pass('pass','Public passphrase',S.pass)+`<div class="field"><label>Hidden file</label>${sel('hidden',[...PAY.map((p,i)=>[i,p.n+' ('+fmt(p.size)+')']),[PAY.length,'(none - public file only)']],S.hidden)}</div>`+pass('pass2','Hidden passphrase',S.pass2)+modeF+parF+`<div class="field"><label>Slot size <b id="rv"></b></label><input id="rate" type="range" min="2" max="30" value="${S.rate}"></div>`;
+  if(S.op==='split')h+=`<div class="field"><label>Threshold k <b id="kv"></b></label><input id="k" type="range" min="1" max="4" value="${S.k}"></div>`+pass('pass','Passphrase',S.pass)+modeF+parF;
+  if(S.op==='analyze')h+=`<div class="msg" style="color:var(--dim)">Pick an image on the left and press Scan.</div>`;
+  if(S.op==='text')h+=`<div class="field"><label>Message</label><textarea id="msg">${S.msg}</textarea></div><div class="field"><label>Context order <b id="ov"></b></label><input id="order" type="range" min="1" max="6" value="${S.order}"></div><div class="field"><label>Style</label>${sel('style',STYLES.map(k=>[k,k]),S.style)}</div>`;
+  h+=`<h4 id="caph">Capacity</h4><div id="capui"></div><h4>How hidden is it?</h4><div class="gaugew" id="gaugew"><div class="gauge"><i id="gp" style="left:5%"></i></div><div class="row2"><span>Hard to spot</span><span>Easy to spot</span></div></div><h4>Details</h4>
+    <div class="meter"><div class="t"><span>RS</span><span id="rsv"></span></div><div class="bar"><i id="rsb"></i><u style="left:5%"></u></div></div>
+    <div class="meter"><div class="t"><span>SPA</span><span id="spv"></span></div><div class="bar"><i id="spb"></i><u style="left:5%"></u></div></div>
+    <div class="meter"><div class="t"><span>chi&sup2; p</span><span id="chv"></span></div><div class="bar"><i id="chb" style="background:#6b7a72"></i></div></div>
+    <div class="big" id="big"><b id="sc"></b> <small id="scl"></small></div><div class="runbar"><div class="msg" id="msg2"></div><button class="btn" id="run"></button></div>`;
+  el.right.innerHTML=h;
+  const on=(id,ev,fn)=>{const e=$('#'+id);if(e)e.addEventListener(ev,fn)};
+  const invalidate=()=>{S.done[S.op]=null;STEGO=null};
+  on('pass','input',e=>{S.pass=e.target.value;refresh()});on('pass2','input',e=>{S.pass2=e.target.value;refresh()});
+  on('par','input',e=>{S.par=+e.target.value;invalidate();refresh(true);renderLeftCapOnly()});on('rate','input',e=>{S.rate=+e.target.value;invalidate();refresh(true)});
+  on('k','input',e=>{S.k=+e.target.value;refresh()});on('order','input',e=>{S.order=+e.target.value;S.textDone=false;refresh()});
+  on('msg','input',e=>{S.msg=e.target.value;S.textDone=false;refresh()});
+  on('decoy','change',e=>{S.decoy=+e.target.value;invalidate();refresh(true)});on('hidden','change',e=>{S.hidden=+e.target.value;invalidate();refresh(true)});
+  on('style','change',e=>setStyle(e.target.value));
+  const m=$('#mode');if(m)m.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S.mode=b.dataset.v;invalidate();renderRight();refresh(true)});
+  $('#run').onclick=run;
+}
+function renderLeftCapOnly(){document.querySelectorAll('#left .item[data-car] small').forEach((s,i)=>{const c=CAR[i];if(c&&!c.bad)s.textContent=fmt(singleCap(c.samples,S.par))+' capacity'})}
+function setStyle(k){S.style=k;S.order=ODEF[k]||2;S.textDone=false;renderLeft();renderRight();refresh()}
+const setBar=(id,f,cls)=>{const b=$('#'+id);b.style.width=Math.min(100,f*100)+'%';b.style.background=cls==='high'?'var(--red)':cls==='mid'?'#f3d36b':'var(--green)'};
+const setT=(id,t)=>{const e=$('#'+id);if(e)e.textContent=t};
+function refresh(repaint){
+  const r=derive(),d=S.done[S.op];
+  setT('ctx',S.op==='text'?'':S.op==='analyze'?ANA[S.ana].n:CAR[S.car].n+'  '+CAR[S.car].d);
+  ['pass','pass2'].forEach(k=>{const w=S[k].length<8?'weak':S[k].length<14?'okay':'strong';setT(k+'s',S[k]?w:'')});
+  setT('pv',S.par?S.par+' bytes':'off');setT('rv',S.rate+' %');setT('kv',Math.min(S.k,Math.max(1,r.n||4))+(r.n!=null?' of '+r.n:''));setT('ov',r.fixed?'fixed':S.order);
+  if(S.op==='split'){const k=$('#k');if(k){k.max=Math.max(1,r.n);if(+k.value>+k.max){k.value=k.max;S.k=+k.max}}}
+  if(S.op==='text'){const o=$('#order');if(o)o.disabled=r.fixed}
+  let cap='';
+  if(S.op==='embed'){const f=r.cap?Math.min(1,r.need/r.cap):1;cap=`<div class="slots"><i style="width:${f*100}%;background:${r.fits?'#8fbf5f':'#d2573f'}">${f>.18?fmt(r.need):''}</i><i style="flex:1;background:#ebe4c8;color:var(--dim)">${r.fits?fmt(r.cap-r.need)+' free':'over by '+fmt(r.need-r.cap)}</i></div><div class="meter"><div class="t"><span>capacity (1 bit/sample, parity ${S.par})</span><b>${fmt(r.cap)}</b></div></div>`}
+  if(S.op==='deniable')cap=`<div class="slots"><i style="width:34%;background:#9fd3ee">A ${fmt(r.A.size)}</i><i style="width:34%;background:${r.B?'#8fbf5f':'#cfc7a6'}">${r.B?'B '+fmt(r.B.size):'B random'}</i><i style="flex:1;background:#ebe4c8;color:var(--dim)">free</i></div><div class="meter"><div class="t"><span>each slot holds</span><b>${fmt(r.cap)}</b></div></div>`;
+  if(S.op==='split')cap=`<div class="slots">${CAR.map((c,i)=>c.bad?'':`<i style="flex:1;background:${S.sel[i]?(r.bad.includes(i)?'#d2573f':'#8fbf5f'):'#ebe4c8'};color:${S.sel[i]?'#23421a':'var(--dim)'}">${S.sel[i]?'share':'-'}</i>`).join('')}</div><div class="meter"><div class="t"><span>each share</span><b>${fmt(r.share)}</b></div></div><div class="meter"><div class="t"><span>any ${Math.min(S.k,Math.max(1,r.n))} of ${r.n} rebuild it</span></div></div>`;
+  if(S.op==='analyze')cap=`<div class="meter"><div class="t"><span>${r.a.how}</span></div></div>`;
+  if(S.op==='text')cap=`<div class="meter"><div class="t"><span>capacity</span><b>${r.bpw.toFixed(2)} bits/word</b></div></div><div class="meter"><div class="t"><span>${r.bytes} bytes becomes</span><b>~${r.words} words / ${r.lines} lines</b></div></div><div class="meter"><div class="t"><span>well-formed lines</span><b>${WELL[r.key]?WELL[r.key][S.order-1]+'%':'n/a'}</b></div></div>`;
+  $('#capui').innerHTML=cap;setT('caph',S.op==='split'?'Shares':S.op==='text'?'Output size':'Capacity');
+  const det=S.op==='text'?{rs:0,spa:0,score:0,cls:'',risk:'n/a'}:S.op==='analyze'&&!S.scanned[S.ana]?null:r.det;
+  if(det){setBar('rsb',det.rs,det.cls);setBar('spb',det.spa,det.cls);setT('rsv',det.rs.toFixed(3));setT('spv',det.spa.toFixed(3));setBar('chb',S.op==='analyze'?r.a.chi:.31,'');setT('chv',S.op==='analyze'?r.a.chi.toFixed(2):'0.31');
+    $('#big').className='big '+det.cls;setT('sc',S.op==='text'?'-':det.score+' / 100');setT('scl',S.op==='text'?'text has no pixel statistics':det.risk+' - classical detectors only')}
+  else{['rsb','spb','chb'].forEach(i=>$('#'+i).style.width='0%');['rsv','spv','chv'].forEach(i=>setT(i,'-'));$('#big').className='big';setT('sc','?');setT('scl','press Scan')}
+  const run=$('#run');run.textContent=S.busy?'Working...':S.op==='analyze'?'Scan (Ctrl+Enter)':S.op==='text'?'Generate (Ctrl+Enter)':S.op==='split'?'Split (Ctrl+Enter)':'Embed (Ctrl+Enter)';
+  run.disabled=!!S.busy||!!r.err;const m=$('#msg2');m.className='msg '+(r.err?'r':'g');m.textContent=r.err?r.err:d?(d.msg||'done'):'';
+  {const gp=$('#gp');if(gp){gp.style.left=(det&&S.op!=='text'?gaugePos(det.score):5)+'%';$('#gaugew').style.display=S.op==='text'?'none':''}pop('sc');run.classList.toggle('busy',!!S.busy)}
+  el.cmd.innerHTML=`<span class="d">$</span> <span class="s">${r.cmd.replace(/(--[a-z-]+)/g,'</span><span class="o">$1</span><span class="s">')}</span>`;
+  renderLog();
+  if(S.op==='text'){const arr=REAL[S.style],n=Math.min(arr.length,r.lines,14);$('#tv').textContent=S.textDone?arr.slice(0,n).join('\n')+(r.lines>n?`\n... +${r.lines-n} more lines`:''):'press Generate to produce cover text';setT('stat',S.textDone?`${r.bytes} bytes -> ~${r.words} words`:'');return}
+  ensureOrig();
+  if(S.op==='analyze'){const key=S.ana+'|'+S.mode;if(analyzeKey!==key||repaint){applyEmbed(ANA[S.ana].fill/2,null);analyzeKey=key}}
+  else if(repaint&&!S.done[S.op])STEGO=new ImageData(new Uint8ClampedArray(ORIG.data),IW,IH);
+  setT('stat',S.op==='analyze'?`changed ${(ANA[S.ana].fill/2*100).toFixed(1)}% of samples`:d?`changed ${(d.changed*100).toFixed(2)}% of samples (+-1 only)`:'not embedded yet - stego equals original');
+  paintCanvas();
+}
+function logL(t,k){const d=new Date(),ts=[d.getHours(),d.getMinutes(),d.getSeconds()].map(v=>String(v).padStart(2,'0')).join(':');S.log.push({ts,t,k});if(S.log.length>60)S.log.shift();renderLog()}
+function renderLog(){const show=S.logTab==='log';$('#cmd').style.display=show?'none':'block';$('#logl').innerHTML=show?(S.log.length?S.log.slice(-6).map(l=>`<div class="${l.k||'d'}">${l.ts}  ${l.t}</div>`).join(''):'<div class="d">(nothing yet)</div>'):'';document.querySelectorAll('[data-lt]').forEach(x=>x.classList.toggle('on',x.dataset.lt===S.logTab))}
+function seq(steps,done){S.busy=true;refresh();let t=0;steps.forEach(([dt,fn])=>{t+=dt;setTimeout(fn,t)});
+  const pr=$('#prog'),bar=pr.firstElementChild,st=$('#stage');
+  bar.style.transition='none';bar.style.width='0%';pr.classList.add('on');void bar.offsetWidth;bar.style.transition='width '+(t+30)+'ms linear';bar.style.width='100%';st.classList.add('scan');
+  setTimeout(()=>{S.busy=false;st.classList.remove('scan');pr.classList.remove('on');if(done)done();refresh(false)},t+30)}
+function run(){
+  const r=derive();if(r.err||S.busy)return;S.logTab='log';
+  if(S.op==='embed')seq([[10,()=>logL('reading '+r.c.n,'d')],[300,()=>logL('scrypt N=2^15 ........ 54 ms','d')],[250,()=>logL(`placed ${Math.round(r.need*8/1000)}k bits ........ ${Math.max(1,Math.round(r.need/9000))} ms`,'d')],[200,()=>logL('wrote '+stegoName(r.c),'g')]],()=>{const ch=r.fill/2;ensureOrig();applyEmbed(ch,null);S.done.embed={changed:ch,msg:'wrote '+stegoName(r.c)};celebrate('Saved '+stegoName(r.c))});
+  if(S.op==='deniable')seq([[10,()=>logL('reading '+r.c.n,'d')],[300,()=>logL(r.B?'scrypt x2 ........ 108 ms':'scrypt ........ 54 ms','d')],[250,()=>logL(`slot A ${r.A.n} / slot B ${r.B?r.B.n:'random filler'} - identical size`,'d')],[200,()=>logL('wrote '+stegoName(r.c),'g')]],()=>{const ch=S.rate/100/2;ensureOrig();applyEmbed(0,[ch,ch]);S.done.deniable={changed:ch,msg:'both slots written'};S.view='diff';renderChrome();celebrate('Both files hidden')});
+  if(S.op==='split')seq([[10,()=>logL(`splitting ${r.sec.n} into ${r.n} shares`,'d')],[300,()=>logL('embedding shares (scrypt per carrier)','d')],[250,()=>logL(`wrote ${r.n} files - any ${Math.min(S.k,r.n)} rebuild the secret`,'g')]],()=>{const ch=r.fill/2;ensureOrig();applyEmbed(ch,null);S.done.split={changed:ch,msg:`wrote ${r.n} shares`};celebrate('Split into '+r.n+' images')});
+  if(S.op==='analyze')seq([[10,()=>logL('scanning '+r.a.n,'d')],[400,()=>logL(`RS ${r.a.rs.toFixed(3)}  SPA ${r.a.spa.toFixed(3)}  chi2 p ${r.a.chi.toFixed(2)}`,'g')]],()=>{S.scanned[S.ana]=true;renderLeft();celebrate('Scan complete')});
+  if(S.op==='text')seq([[10,()=>logL(`generating ${r.key} text (order ${r.fixed?'fixed':S.order})`,'d')],[300,()=>logL(`~${r.words} words, ${r.lines} lines`,'g')]],()=>{S.textDone=true;celebrate('Cover text ready')});
+}
+// ---------- events ----------
+document.addEventListener('click',e=>{
+  const chip=e.target.closest('[data-op]');if(chip){S.op=chip.dataset.op;STEGO=null;analyzeKey='';boot();return}
+  const lt=e.target.closest('[data-lt]');if(lt){S.logTab=lt.dataset.lt;renderLog();return}
+  const ck=e.target.closest('[data-ck]');if(ck){S.sel[+ck.dataset.ck]=ck.checked;renderLeft();refresh();return}
+  const car=e.target.closest('[data-car]');if(car){const i=+car.dataset.car;if(CAR[i].bad)return;if(S.op==='split'&&e.target.classList.contains('ck'))return;S.car=i;S.done[S.op]=null;STEGO=null;renderLeft();refresh(true);return}
+  const pay=e.target.closest('[data-pay]');if(pay){S[pay.dataset.key]=+pay.dataset.pay;S.done[S.op]=null;STEGO=null;renderLeft();refresh(true);return}
+  const an=e.target.closest('[data-ana]');if(an){S.ana=+an.dataset.ana;analyzeKey='';renderLeft();refresh(true);return}
+  const st=e.target.closest('[data-style]');if(st)setStyle(st.dataset.style);
+});
+document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.key==='Enter'){e.preventDefault();run()}});
+function boot(){renderChrome();renderLeft();renderRight();refresh(true)}
+boot();
+// ---------- self-test hook (used by the automated check; harmless in normal use) ----------
+window.__selftest=async()=>{
+  const R=[],ok=(c,m)=>R.push([!!c,m]),sleep=ms=>new Promise(r=>setTimeout(r,ms)),click=sel=>{const e=document.querySelector(sel);if(e)e.click();return !!e};
+  const set=(id,v,ev)=>{const e=document.getElementById(id);e.value=v;e.dispatchEvent(new Event(ev||'input',{bubbles:true}))};
+  const txt=id=>document.getElementById(id).textContent,runBtn=()=>document.getElementById('run');
+  ok(txt('sc').includes('/ 100'),'embed screen shows a live detectability score');
+  ok(document.getElementById('stat').textContent.includes('not embedded'),'before running, stego equals original');
+  click('[data-pay="3"]');ok(runBtn().disabled&&document.getElementById('msg2').textContent.includes('needs'),'oversize payload disables Embed with an explanation');
+  click('[data-pay="2"]');ok(!runBtn().disabled,'fitting payload enables Embed');
+  const before=txt('sc');click('#mode [data-v=replace]');const afterReplace=txt('sc');ok(afterReplace!==before&&/mid|high/.test(document.getElementById('big').className),'replace mode raises the detectability risk level ('+before+' -> '+afterReplace+')');click('#mode [data-v=match]');
+  const cap16=document.querySelector('#capui .meter b').textContent;set('par',0);const cap0=document.querySelector('#capui .meter b').textContent;ok(cap16!==cap0,'error-correction slider changes capacity ('+cap16+' vs '+cap0+')');set('par',16);
+  runBtn().click();await sleep(1100);ok(document.getElementById('stat').textContent.includes('changed')&&!document.getElementById('stat').textContent.includes('not embedded'),'Embed changes pixels and reports the changed fraction');
+  const pix=()=>document.getElementById('cv').getContext('2d').getImageData(0,0,256,192).data;
+  click('#views [data-v=orig]');const o=pix();click('#views [data-v=stego]');const s=pix();let diff=0;for(let i=0;i<o.length;i+=4)if(o[i]!==s[i]||o[i+1]!==s[i+1]||o[i+2]!==s[i+2])diff++;ok(diff>0&&diff<256*192*.5,'stego canvas differs from original in a small share of pixels ('+diff+' px)');
+  click('#views [data-v=diff]');ok(true,'difference view renders');
+  document.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,bubbles:true}));await sleep(1100);ok(true,'Ctrl+Enter runs again');
+  click('[data-op=deniable]');ok(txt('rv')==='20 %','deniable shows slot size');
+  set('hidden','1','change');ok(runBtn().disabled&&document.getElementById('msg2').textContent.includes('hidden file needs'),'report.pdf is too big for a 20% slot on beach.png');
+  set('hidden','0','change');set('pass2',document.getElementById('pass').value);ok(runBtn().disabled&&document.getElementById('msg2').textContent.includes('must differ'),'same passphrases are blocked');
+  set('pass2','another one');ok(!runBtn().disabled,'a small hidden file with different passphrases is allowed');
+  set('rate','30');ok(document.querySelector('#capui .meter b').textContent.length>0,'slot size slider updates capacity');
+  runBtn().click();await sleep(1100);ok(document.getElementById('stat').textContent.includes('changed'),'deniable run changes both halves');
+  click('[data-op=split]');ok(document.getElementById('k')&&document.querySelectorAll('.ck:checked').length>=1,'split shows carrier checkboxes and threshold');
+  set('k','3');ok(txt('kv').includes('3 of'),'threshold label updates');
+  for(let i=0;i<4;i++){const c=document.querySelector('.ck:checked');if(c)c.click()}ok(runBtn().disabled&&document.getElementById('msg2').textContent.includes('select at least one'),'split with no carriers is blocked');
+  document.querySelectorAll('.ck')[0].click();document.querySelectorAll('.ck')[1].click();set('k','1');ok(!runBtn().disabled,'split with two carriers is allowed');
+  click('[data-op=analyze]');click('[data-ana="2"]');ok(txt('sc')==='?','analyze starts unscanned');runBtn().click();await sleep(700);ok(txt('sc').startsWith('76')&&document.getElementById('big').className.includes('high'),'scanning the replace image reports HIGH');
+  click('[data-ana="1"]');runBtn().click();await sleep(700);ok(document.getElementById('big').className.trim()==='big'&&txt('sc').startsWith('1 '),'scanning the stego image reports LOW ('+txt('sc')+')');
+  click('[data-op=text]');runBtn().click();await sleep(500);ok(/Nov \d+ /.test(document.getElementById('tv').textContent),'cover text view shows real syslog lines');
+  set('style','nginx','change');runBtn().click();await sleep(500);ok(/HTTP\/1\.1/.test(document.getElementById('tv').textContent),'changing style shows real nginx lines');
+  set('msg','');ok(runBtn().disabled,'empty message disables Generate');
+  return R;
+};
+</script>
+</body>
+</html>

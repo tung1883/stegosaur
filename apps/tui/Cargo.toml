@@ -1,0 +1,22 @@
+[package]
+name = "stegosaur-tui"
+version = "0.1.0"
+edition = "2024"
+description = "Terminal user interface for Stegosaur"
+
+[lib]
+name = "stegosaur_tui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "stegosaur-tui"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.30.2"
+stegosaur = { path = "../.." }
+zeroize = "1.9.2"
+
+[dev-dependencies]
+hound = "3.5.1"
+tempfile = "3.27.0"

@@ -1,0 +1,47 @@
+[package]
+name = "stegosaur"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chacha20poly1305 = "0.11.0"
+clap = { version = "4.6.8", features = ["derive", "env"] }
+claxon = "0.4"
+flacenc = "0.5.1"
+hkdf = "0.13.0"
+hound = "3.5.1"
+image = { version = "0.25.10", default-features = false, features = ["png", "bmp", "tiff", "webp", "pnm"] }
+rand = "0.8"
+rand_chacha = "0.3"
+scrypt = "0.12.0"
+sha2 = "0.11.1"
+thiserror = "2.0.21"
+zeroize = "1.9.2"
+
+[dev-dependencies]
+criterion = "0.8.2"
+# Only the tests and developer examples decode JPEG with this, as an independent check of our own decoder.
+image = { version = "0.25.10", default-features = false, features = ["jpeg"] }
+image021 = { version = "0.21", package = "image", default-features = false }
+proptest = "1.12.0"
+reed-solomon = "0.2.1"
+sharks = "0.5.0"
+steganography = "1.0.2"
+tempfile = "3.27.0"
+
+[[bench]]
+name = "bench"
+harness = false
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+[workspace]
+members = [".", "apps/tui", "apps/desktop/core", "apps/desktop/src-tauri"]
+# The desktop app needs the Tauri toolchain, so everyday workspace commands skip it unless asked for with -p.
+default-members = [".", "apps/tui", "apps/desktop/core"]
+
+# Dependencies (scrypt, chacha, image codecs) are far too slow unoptimised; our own code keeps debug checks.
+[profile.dev.package."*"]
+opt-level = 3
