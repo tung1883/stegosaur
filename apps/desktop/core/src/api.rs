@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use stegosaur::analysis::{Report, Risk};
-use stegosaur::app::files::{scan_dir, CarrierCache, CarrierKind, FileKind};
+use stegosaur::app::files::{classify, scan_dir, CarrierCache, CarrierKind, FileKind};
+use stegosaur::app::hide::{HideSpec, Layout, Naming, Payload};
 use stegosaur::app::jobs::{self, JobEvent, JobResult, JobSpec, RevealLayout};
 use stegosaur::app::preview::{fit_embed, fit_hidden, measure_hidden, measure_jpeg_hidden, measure_jpeg_single, measure_single, preview_split, simulate_hidden, simulate_single, AUDIO_NOTE, JPEG_NOTE};
 use stegosaur::app::views::render_views;
@@ -31,6 +32,78 @@ fn secret(mut s: String) -> Secret {
     let r = Secret::new(&s);
     s.zeroize();
     r
+}
+
+fn kdf_of(name: &str) -> stegosaur::crypto::KdfParams {
+    if name == "strong" { stegosaur::crypto::KdfParams::strong() } else { stegosaur::crypto::KdfParams::default() }
+}
+
+fn cfg_full(mode: &str, parity: usize, rate: f64, kdf: &str) -> AppConfig {
+    AppConfig { kdf: kdf_of(kdf), ..cfg(mode, parity, rate) }
+}
+
+fn payload_of(p: PayloadDto) -> Result<Payload, String> {
+    match (p.path.filter(|s| !s.trim().is_empty()), p.text) {
+        (Some(path), _) => Ok(Payload::File(PathBuf::from(path))),
+        (None, Some(t)) => Ok(Payload::Text(secret(t))),
+        _ => Err("A secret needs a file or some text.".into()),
+    }
+}
+
+fn hide_dto(done: stegosaur::app::hide::HideDone) -> ResultDto {
+    ResultDto::Hide {
+        layout: done.kind,
+        items: done
+            .items
+            .into_iter()
+            .map(|i| HideItemDto { what: i.what, cover: path_str(&i.cover), output: i.output.as_ref().map(|p| path_str(p)), bytes: i.bytes, report: i.report.map(report_dto), error: i.error })
+            .collect(),
+    }
+}
+
+fn is_text_name(name: &str) -> bool {
+    let l = name.to_ascii_lowercase();
+    l.ends_with(".txt") || l.ends_with(".log")
+}
+
+fn accepts(e: &stegosaur::app::files::Entry, accept: &str) -> bool {
+    let carrier = matches!(e.kind, FileKind::Carrier(_));
+    match accept {
+        "cover" => carrier,
+        "image" => matches!(e.kind, FileKind::Carrier(k) if !k.is_audio()),
+        "reveal" => carrier || is_text_name(&e.name),
+        _ => true,
+    }
+}
+
+fn entry_dto(e: stegosaur::app::files::Entry) -> EntryDto {
+    EntryDto {
+        path: path_str(&e.path),
+        name: e.name,
+        kind: match e.kind {
+            FileKind::Dir => "dir",
+            FileKind::Carrier(_) => "carrier",
+            FileKind::Unusable => "unusable",
+            FileKind::Other => "other",
+        },
+        carrier: match e.kind {
+            FileKind::Carrier(k) => Some(match k {
+                CarrierKind::Png => "png",
+                CarrierKind::Bmp => "bmp",
+                CarrierKind::Tiff => "tiff",
+                CarrierKind::Webp => "webp",
+                CarrierKind::Ppm => "ppm",
+                CarrierKind::Jpeg => "jpeg",
+                CarrierKind::Wav => "wav",
+                CarrierKind::Flac => "flac",
+            }),
+            _ => None,
+        },
+        size: e.size,
+        summary: e.info.as_ref().map(|i| i.summary.clone()),
+        samples: e.info.as_ref().map(|i| i.samples),
+        note: e.note,
+    }
 }
 
 fn report_dto(r: Report) -> ReportDto {
@@ -90,6 +163,7 @@ fn result_dto(r: JobResult) -> ResultDto {
         JobResult::Joined { output, bytes, used } => ResultDto::Joined { output: path_str(&output), bytes, used },
         JobResult::Analyzed { report } => ResultDto::Analyzed { report: report_dto(report) },
         JobResult::Bulk { report, checked } => bulk_dto(report, checked),
+        JobResult::Hide(done) => hide_dto(done),
         JobResult::TextHidden { text, words, saved } => ResultDto::TextHidden { text, words, saved: saved.map(|p| path_str(&p)) },
         JobResult::TextRevealed { bytes, saved } => ResultDto::TextRevealed { text: String::from_utf8_lossy(&bytes).into_owned(), bytes: bytes.len(), saved: saved.map(|p| path_str(&p)) },
     }
@@ -119,14 +193,52 @@ fn to_spec(dto: JobDto) -> Result<JobSpec, String> {
             let out_dir = opt_path(out_dir).or_else(|| carriers.first().and_then(|c| c.parent().map(|p| p.to_path_buf()))).unwrap_or_default();
             JobSpec::Split { secret: secret_file.into(), k, pass: secret(pass), carriers, out_dir, cfg: cfg(&mode, parity, 0.1), overwrite }
         }
-        JobDto::Bulk { folder, passes, out_dir, recursive, names_only } => {
-            let folder = PathBuf::from(folder);
-            let out_dir = opt_path(out_dir).unwrap_or_else(|| folder.join("recovered"));
+        JobDto::Bulk { inputs, passes, out_dir, recursive, names_only, text, parity, rate, kdf } => {
+            let inputs: Vec<PathBuf> = inputs.into_iter().map(PathBuf::from).collect();
+            let first = inputs.first().cloned().ok_or("Choose the files to open.")?;
+            let base = if first.is_dir() { first.clone() } else { first.parent().map(|p| p.to_path_buf()).unwrap_or_default() };
+            let out_dir = opt_path(out_dir).unwrap_or_else(|| base.join("recovered"));
             let passes: Vec<Secret> = passes.into_iter().filter(|p| !p.is_empty()).map(secret).collect();
             if passes.is_empty() {
                 return Err("Enter at least one passphrase.".into());
             }
-            JobSpec::Bulk { folder, recursive, passes, out_dir, names_only, cfg: AppConfig::default() }
+            let text = match text {
+                Some(t) => {
+                    let style = style_of(&t.style)?;
+                    Some((style, text::adjustable_order(style).then_some(t.order).flatten()))
+                }
+                None => None,
+            };
+            JobSpec::Bulk { inputs, recursive, passes, out_dir, names_only, cfg: cfg_full("match", parity, rate, &kdf), text }
+        }
+        JobDto::Hide { layout, payloads, covers, second, pass, pass2, k, naming, pattern, out_dir, mode, parity, rate, kdf, overwrite } => {
+            let covers: Vec<PathBuf> = covers.into_iter().map(PathBuf::from).collect();
+            let mut payloads: Vec<Payload> = payloads.into_iter().map(payload_of).collect::<Result<_, _>>()?;
+            let cover1 = |c: &Vec<PathBuf>| c.first().cloned().ok_or("Choose where to hide it.".to_string());
+            let first = |p: &mut Vec<Payload>| if p.is_empty() { Err("Choose what to hide.".to_string()) } else { Ok(p.remove(0)) };
+            let layout = match layout.as_str() {
+                "single" => Layout::Single { payload: first(&mut payloads)?, cover: cover1(&covers)? },
+                "same" => Layout::SameLook { payload: first(&mut payloads)?, cover: cover1(&covers)? },
+                "two" => {
+                    let second = payload_of(second.ok_or("Choose the second secret.")?)?;
+                    let sp = pass2.filter(|p| !p.is_empty()).ok_or("Enter the second passphrase.")?;
+                    Layout::Two { payload: first(&mut payloads)?, second, second_pass: secret(sp), cover: cover1(&covers)? }
+                }
+                "split" => Layout::Split { payload: first(&mut payloads)?, covers, k },
+                "bulk" => {
+                    if payloads.len() > covers.len() {
+                        return Err(format!("{} files need {} covers, but you chose {}.", payloads.len(), payloads.len(), covers.len()));
+                    }
+                    Layout::Bulk { pairs: payloads.into_iter().zip(covers).collect() }
+                }
+                other => return Err(format!("Unknown layout: {other}.")),
+            };
+            let naming = match naming.as_str() {
+                "suffix" => Naming::Suffix,
+                "pattern" => Naming::Pattern(pattern.filter(|p| !p.trim().is_empty()).unwrap_or_else(|| "{name}_{n}".into())),
+                _ => Naming::Ordinary,
+            };
+            JobSpec::Hide(HideSpec { layout, pass: secret(pass), cfg: cfg_full(&mode, parity, rate, &kdf), naming, out_dir: opt_path(out_dir), overwrite })
         }
         JobDto::Reveal { carrier, pass, output, parity, rate, overwrite } => {
             let carrier = PathBuf::from(carrier);
@@ -196,6 +308,42 @@ impl Core {
             v.push("/".into());
         }
         v
+    }
+
+    /// Describes chosen files (and, for a folder, the files directly inside it) for the Hide, Reveal and Analyze lists.
+    /// `accept` is "any", "cover", "image" or "reveal"; files inside a folder that do not fit are left out,
+    /// while a file picked by name is always described so the screen can say why it cannot be used.
+    pub fn describe(&self, paths: Vec<String>, accept: &str, recursive: bool) -> Result<Vec<EntryDto>, String> {
+        let mut out: Vec<EntryDto> = Vec::new();
+        for p in paths {
+            let path = PathBuf::from(&p);
+            if path.is_dir() && recursive {
+                for f in stegosaur::app::bulk::list_files(&path, true, None).map_err(msg)? {
+                    let (kind, info, note) = classify(&f);
+                    let size = std::fs::metadata(&f).map(|m| m.len()).unwrap_or(0);
+                    let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    let e = stegosaur::app::files::Entry { path: f, name, kind, size, info, note };
+                    if e.name.starts_with('.') || !accepts(&e, accept) {
+                        continue;
+                    }
+                    out.push(entry_dto(e));
+                }
+            } else if path.is_dir() {
+                for e in scan_dir(&path).map_err(msg)? {
+                    if e.kind != FileKind::Dir && accepts(&e, accept) {
+                        out.push(entry_dto(e));
+                    }
+                }
+            } else if path.is_file() {
+                let (kind, info, note) = classify(&path);
+                let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                out.push(entry_dto(stegosaur::app::files::Entry { path, name, kind, size, info, note }));
+            }
+        }
+        let mut seen = std::collections::HashSet::new();
+        out.retain(|e| seen.insert(e.path.clone()));
+        Ok(out)
     }
 
     pub fn list(&self, path: &str) -> Result<ListingDto, String> {
@@ -382,6 +530,16 @@ impl Core {
             running.store(false, Ordering::SeqCst);
         });
         Ok(id)
+    }
+
+    /// Writes generated cover text to a file the person chose. Never overwrites a different kind of file silently:
+    /// the save window has already asked about replacing.
+    pub fn save_text(&self, path: &str, text: &str) -> Result<(), String> {
+        let p = PathBuf::from(path);
+        if p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref() != Some("txt") {
+            return Err("Save the text as a .txt file.".into());
+        }
+        std::fs::write(&p, text).map_err(|e| format!("Could not save the file: {e}."))
     }
 
     pub fn text_estimate(&self, r: TextEstimateReq) -> Result<TextEstimateDto, String> {

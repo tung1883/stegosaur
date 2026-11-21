@@ -145,14 +145,50 @@ fn default_max_dim() -> u32 {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JobDto {
+    /// Look at files and folders with every passphrase and recover what opens.
     Bulk {
-        folder: String,
+        inputs: Vec<String>,
         passes: Vec<String>,
         out_dir: Option<String>,
         #[serde(default)]
         recursive: bool,
         #[serde(default)]
         names_only: bool,
+        /// Read .txt and .log files as cover text in this style.
+        text: Option<TextOptsDto>,
+        #[serde(default = "default_parity")]
+        parity: usize,
+        #[serde(default = "default_rate")]
+        rate: f64,
+        #[serde(default = "default_kdf")]
+        kdf: String,
+    },
+    /// The unified Hide job: every layout, typed or file secrets, naming schemes.
+    Hide {
+        /// single, same, two, split or bulk
+        layout: String,
+        payloads: Vec<PayloadDto>,
+        covers: Vec<String>,
+        second: Option<PayloadDto>,
+        pass: String,
+        pass2: Option<String>,
+        #[serde(default = "default_k")]
+        k: u8,
+        /// ordinary, suffix or pattern
+        #[serde(default = "default_naming")]
+        naming: String,
+        pattern: Option<String>,
+        out_dir: Option<String>,
+        #[serde(default = "default_mode")]
+        mode: String,
+        #[serde(default = "default_parity")]
+        parity: usize,
+        #[serde(default = "default_rate")]
+        rate: f64,
+        #[serde(default = "default_kdf")]
+        kdf: String,
+        #[serde(default)]
+        overwrite: bool,
     },
     Embed {
         carrier: String,
@@ -238,6 +274,29 @@ pub enum JobDto {
     },
 }
 
+/// A secret: a file, or text typed on screen.
+#[derive(Deserialize)]
+pub struct PayloadDto {
+    pub path: Option<String>,
+    pub text: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct TextOptsDto {
+    pub style: String,
+    pub order: Option<usize>,
+}
+
+fn default_k() -> u8 {
+    2
+}
+fn default_naming() -> String {
+    "ordinary".into()
+}
+fn default_kdf() -> String {
+    "standard".into()
+}
+
 // Passphrases must never reach a log, so Debug shows only which kind of job this is.
 impl std::fmt::Debug for JobDto {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -249,6 +308,7 @@ impl std::fmt::Debug for JobDto {
             JobDto::Join { .. } => "join",
             JobDto::Analyze { .. } => "analyze",
             JobDto::Bulk { .. } => "bulk",
+            JobDto::Hide { .. } => "hide",
             JobDto::TextHide { .. } => "text_hide",
             JobDto::TextReveal { .. } => "text_reveal",
         };
@@ -266,8 +326,20 @@ pub enum ResultDto {
     Joined { output: String, bytes: usize, used: usize },
     Analyzed { report: ReportDto },
     Bulk { out_dir: String, checked: usize, items: Vec<BulkItemDto>, sets: Vec<BulkSetDto> },
+    Hide { layout: &'static str, items: Vec<HideItemDto> },
     TextHidden { text: String, words: usize, saved: Option<String> },
     TextRevealed { text: String, bytes: usize, saved: Option<String> },
+}
+
+/// One result of the Hide job.
+#[derive(Serialize, Clone)]
+pub struct HideItemDto {
+    pub what: String,
+    pub cover: String,
+    pub output: Option<String>,
+    pub bytes: usize,
+    pub report: Option<ReportDto>,
+    pub error: Option<String>,
 }
 
 /// One line of a bulk report. `status` is file, share, nothing or skipped.

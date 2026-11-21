@@ -31,6 +31,17 @@ async fn list_dir(state: State<'_, AppState>, path: String) -> Result<ListingDto
 }
 
 #[tauri::command]
+async fn describe(state: State<'_, AppState>, paths: Vec<String>, accept: String, recursive: bool) -> Result<Vec<EntryDto>, String> {
+    let core = state.0.clone();
+    blocking(move || core.describe(paths, &accept, recursive)).await
+}
+
+#[tauri::command]
+fn save_text(state: State<AppState>, path: String, text: String) -> Result<(), String> {
+    state.0.save_text(&path, &text)
+}
+
+#[tauri::command]
 async fn preview(state: State<'_, AppState>, req: PreviewReq) -> Result<PreviewDto, String> {
     let core = state.0.clone();
     blocking(move || core.preview(req)).await
@@ -58,7 +69,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState(Arc::new(Core::new())))
-        .invoke_handler(tauri::generate_handler![defaults, roots, list_dir, preview, views, start_job, text_estimate])
+        .invoke_handler(tauri::generate_handler![defaults, roots, list_dir, describe, save_text, preview, views, start_job, text_estimate])
         .run(tauri::generate_context!())
         .expect("error while running Stegosaur");
 }

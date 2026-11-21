@@ -350,3 +350,113 @@ fn cover_text_estimates() {
     assert!((env.bits_per_word - 0.57).abs() < 1e-9, "a fixed-order style ignores the requested order");
     assert!(c.text_estimate(serde_json::from_value(json!({"style":"nope","len":1})).unwrap()).is_err());
 }
+
+// ---------- the redesign: unified Hide job, files for Bulk, describe, save_text ----------
+
+fn kdf_fast_note() {} // the JSON layer always uses the real KDF; payloads here are tiny so it stays quick
+
+#[test]
+fn hide_job_covers_every_layout_through_json() {
+    kdf_fast_note();
+    let d = tempfile::tempdir().unwrap();
+    let c1 = png(d.path(), "one.png", 160, 120, 1);
+    let c2 = png(d.path(), "two.png", 160, 120, 2);
+    let c3 = png(d.path(), "three.png", 160, 120, 3);
+    let a = file(d.path(), "a.bin", &data(300, 1));
+    let b = file(d.path(), "b.bin", &data(200, 2));
+    let core = Core::new();
+
+    // one file, typed text, named by the cover
+    let ev = run_json(&core, json!({"kind":"hide","layout":"single","payloads":[{"text":"meet at noon"}],"covers":[s(&c1)],"pass":"pw one","naming":"suffix"}));
+    let done = last(&ev);
+    assert_eq!(done["event"], "done", "{ev:?}");
+    assert_eq!(done["result"]["kind"], "hide");
+    let out = done["result"]["items"][0]["output"].as_str().unwrap().to_string();
+    assert!(out.ends_with("one_1.png"), "{out}");
+    let ev = run_json(&core, json!({"kind":"bulk","inputs":[out],"passes":["pw one"],"out_dir": s(&d.path().join("rec"))}));
+    assert_eq!(last(&ev)["result"]["items"][0]["status"], "file", "{ev:?}");
+    assert_eq!(std::fs::read(d.path().join("rec").join("one_1.recovered.bin")).unwrap(), b"meet at noon");
+
+    // two secrets in one cover
+    let (a2, b2) = (file(d.path(), "a2.bin", &data(120, 1)), file(d.path(), "b2.bin", &data(100, 2)));
+    let ev = run_json(&core, json!({"kind":"hide","layout":"two","payloads":[{"path":s(&a2)}],"second":{"path":s(&b2)},"covers":[s(&c2)],"pass":"first","pass2":"second","naming":"suffix"}));
+    assert_eq!(last(&ev)["event"], "done", "{ev:?}");
+    assert_eq!(last(&ev)["result"]["layout"], "two");
+
+    // many files, one cover each, with a name pattern
+    let ev = run_json(&core, json!({"kind":"hide","layout":"bulk","payloads":[{"path":s(&a)},{"path":s(&b)}],"covers":[s(&c1), s(&c3)],"pass":"bulk","naming":"pattern","pattern":"{payload}-{n}"}));
+    let items = last(&ev)["result"]["items"].as_array().unwrap().clone();
+    assert_eq!(items.len(), 2, "{ev:?}");
+    assert!(items[0]["output"].as_str().unwrap().ends_with("a-01.png") && items[1]["output"].as_str().unwrap().ends_with("b-02.png"));
+}
+
+#[test]
+fn hide_job_reports_mistakes_in_plain_words() {
+    let d = tempfile::tempdir().unwrap();
+    let c = png(d.path(), "c.png", 100, 100, 4);
+    let a = file(d.path(), "a.bin", &data(50, 1));
+    let core = Core::new();
+    let e = core.start_job(serde_json::from_value(json!({"kind":"hide","layout":"bulk","payloads":[{"path":s(&a)},{"path":s(&a)}],"covers":[s(&c)],"pass":"x"})).unwrap(), |_| {}).unwrap_err();
+    assert!(e.contains("2 files need 2 covers"), "{e}");
+    let e = core.start_job(serde_json::from_value(json!({"kind":"hide","layout":"two","payloads":[{"path":s(&a)}],"covers":[s(&c)],"pass":"x"})).unwrap(), |_| {}).unwrap_err();
+    assert!(e.contains("second secret"), "{e}");
+    // the slot is free again after a rejected request
+    let ev = run_json(&core, json!({"kind":"hide","layout":"single","payloads":[{"path":s(&a)}],"covers":[s(&c)],"pass":"x","naming":"suffix"}));
+    assert_eq!(last(&ev)["event"], "done");
+}
+
+#[test]
+fn passphrases_never_appear_in_hide_events() {
+    let d = tempfile::tempdir().unwrap();
+    let c = png(d.path(), "c.png", 100, 100, 5);
+    let core = Core::new();
+    let ev = run_json(&core, json!({"kind":"hide","layout":"single","payloads":[{"text":"secret words"}],"covers":[s(&c)],"pass":"hunter2-hunter2","naming":"suffix"}));
+    let all = serde_json::to_string(&ev).unwrap();
+    assert!(!all.contains("hunter2") && !all.contains("secret words"), "{all}");
+}
+
+#[test]
+fn describe_expands_folders_and_explains_unusable_files() {
+    let d = tempfile::tempdir().unwrap();
+    png(d.path(), "a.png", 40, 40, 6);
+    file(d.path(), "notes.txt", b"hello");
+    file(d.path(), "song.mp3", b"nope");
+    std::fs::create_dir(d.path().join("sub")).unwrap();
+    png(&d.path().join("sub"), "deep.png", 40, 40, 7);
+    let core = Core::new();
+    let covers = core.describe(vec![s(d.path())], "cover", false).unwrap();
+    assert_eq!(covers.len(), 1, "only the png: {:?}", covers.iter().map(|e| e.name.clone()).collect::<Vec<_>>());
+    let deep = core.describe(vec![s(d.path())], "cover", true).unwrap();
+    assert_eq!(deep.len(), 2, "recursive finds the one in the sub-folder");
+    let reveal = core.describe(vec![s(d.path())], "reveal", false).unwrap();
+    assert!(reveal.iter().any(|e| e.name == "notes.txt"), "text files can be opened");
+    // a file picked by name is described even when it cannot be used, so the screen can say why
+    let mp3 = core.describe(vec![s(&d.path().join("song.mp3"))], "cover", false).unwrap();
+    assert_eq!(mp3[0].kind, "unusable");
+}
+
+#[test]
+fn bulk_takes_files_and_reads_cover_text() {
+    let d = tempfile::tempdir().unwrap();
+    let c = png(d.path(), "c.png", 120, 90, 8);
+    let core = Core::new();
+    let ev = run_json(&core, json!({"kind":"text_hide","message":"note to self","pass":"textpass","style":"syslog","order":null,"save":null}));
+    let text = last(&ev)["result"]["text"].as_str().unwrap().to_string();
+    let txt = d.path().join("cover.log");
+    std::fs::write(&txt, &text).unwrap();
+    let ev = run_json(&core, json!({"kind":"hide","layout":"single","payloads":[{"text":"in a picture"}],"covers":[s(&c)],"pass":"picpass","naming":"suffix"}));
+    let pic = last(&ev)["result"]["items"][0]["output"].as_str().unwrap().to_string();
+    let ev = run_json(&core, json!({"kind":"bulk","inputs":[s(&txt), pic],"passes":["picpass","textpass"],"out_dir": s(&d.path().join("rec")),"text":{"style":"syslog","order":null}}));
+    let items = last(&ev)["result"]["items"].as_array().unwrap().clone();
+    let found: Vec<&str> = items.iter().filter(|i| i["status"] == "file").map(|i| i["detail"].as_str().unwrap()).collect();
+    assert!(found.contains(&"cover text") && found.contains(&"one file"), "{items:?}");
+}
+
+#[test]
+fn save_text_writes_only_txt_files() {
+    let d = tempfile::tempdir().unwrap();
+    let core = Core::new();
+    core.save_text(&s(&d.path().join("x.txt")), "hello").unwrap();
+    assert_eq!(std::fs::read_to_string(d.path().join("x.txt")).unwrap(), "hello");
+    assert!(core.save_text(&s(&d.path().join("x.exe")), "no").is_err());
+}
