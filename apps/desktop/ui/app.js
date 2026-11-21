@@ -1,695 +1,642 @@
 'use strict';
-// Stegosaur desktop UI. All numbers come from Rust: capacity and detectability are measured, never modelled here.
+// Stegosaur desktop UI: three tabs (Hide, Reveal, Analyze), lists you fill with the system's file windows,
+// and a panel on the right. Every number comes from Rust; nothing is modelled here.
 
-const $ = (s) => document.querySelector(s);
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fmt = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + ' MB' : n >= 1024 ? ((n / 1024) >= 100 ? Math.round(n / 1024) : (n / 1024).toFixed(1)) + ' KB' : n + ' B');
-const isAudio = (c) => c === 'wav' || c === 'flac';
-const baseName = (p) => String(p).split(/[\\/]/).pop();
+const fmt = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + ' MB' : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const svg = (d) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + d + '</svg>';
 const ICON = {
-  folder: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
   image: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/>'),
   audio: svg('<path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>'),
-  file: svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>'),
-  block: svg('<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>'),
-  up: svg('<path d="M12 19V5"/><path d="M6 11l6-6 6 6"/>'),
+  text: svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>'),
+  other: svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>'),
+  lossy: svg('<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>'),
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
   check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
+  plus: svg('<path d="M12 5v14M5 12h14"/>'),
+  lock: svg('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
+  arrowUp: svg('<path d="M12 19V5"/><path d="M6 11l6-6 6 6"/>'),
+  arrowDown: svg('<path d="M12 5v14"/><path d="M6 13l6 6 6-6"/>'),
+  chevR: svg('<path d="M9 5l7 7-7 7"/>'),
+  chevD: svg('<path d="M5 9l7 7 7-7"/>'),
+  eye: svg('<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
+  eyeOff: svg('<path d="M3 3l18 18"/><path d="M10.6 6.2A9.8 9.8 0 0 1 12 6c6 0 10 6 10 6a17 17 0 0 1-3.2 3.7M6.3 7.6A17 17 0 0 0 2 12s4 7 10 7a9.6 9.6 0 0 0 4.2-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>'),
+  copy: svg('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>'),
+  paste: svg('<rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 5V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1"/><path d="M9 12h6M9 16h4"/>'),
+  trash: svg('<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/>'),
+  play: svg('<path d="M7 4l13 8-13 8z"/>'),
+  folderPlus: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>'),
+  filePlus: svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 11v6M9 14h6"/>'),
+  key: svg('<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9"/><path d="M16 7l3 3"/>'),
+  warn: svg('<path d="M12 3l10 17H2z"/><path d="M12 10v4M12 17.5v.01"/>'),
+  grip: svg('<circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/>'),
+  download: svg('<path d="M12 4v11"/><path d="M7 11l5 5 5-5"/><path d="M5 20h14"/>'),
+  layers: svg('<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>'),
+  gauge: svg('<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/><circle cx="12" cy="17" r="1.2"/>'),
+  sort: svg('<path d="M8 5v14M5 8l3-3 3 3"/><path d="M16 19V5M13 16l3 3 3-3"/>'),
+  sliders: svg('<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>'),
 };
+const CHEV = ICON.chevR.replace('<svg ', '<svg class="chev" ');
 
-// ---------- tasks and their file slots ----------
-// slot: [id, label, filter, multi]   filter: carrier = any lossless image or audio, image = images only, any = any file
-const OPS = [
-  { id: 'hide', label: 'Hide', run: () => (mode() === 'text' ? 'Generate text' : S.second ? 'Hide both' : 'Hide it'), slots: () => (S.cover === 'text' ? [] : [['carrier', 'Cover', 'carrier'], ['payload', 'File to hide', 'any']].concat(S.second ? [['hidden', 'Second file', 'any']] : [])) },
-  { id: 'reveal', label: 'Reveal', run: () => 'Recover', slots: () => [['carrier', 'Image, audio or text file', 'reveal']] },
-  { id: 'analyze', label: 'Analyze', run: () => 'Scan', slots: () => [['image', 'Image to scan', 'image'], ['compare', 'Compare with original (optional)', 'image']] },
-  { id: 'split', label: 'Split / Join', run: () => (S.task === 'join' ? 'Rebuild' : 'Split'), slots: () => (S.task === 'join' ? [['joinCarriers', 'Images with shares', 'carrier', true]] : [['secret', 'Secret file', 'any'], ['carriers', 'Carrier images', 'carrier', true]]) },
-  { id: 'bulk', label: 'Bulk', run: () => 'Find and recover', slots: () => [] },
-];
-
+// ---------------------------------------------------------------- state
+const IMG_EXT = ['png', 'bmp', 'tif', 'tiff', 'webp', 'ppm', 'jpg', 'jpeg'];
+const AUD_EXT = ['wav', 'flac'];
+const TXT_EXT = ['txt', 'log'];
 const S = {
-  op: 'hide',
-  cover: 'file', second: false, twoSlot: false,
-  dir: null,
-  listing: null,
-  roots: [],
-  active: 'carrier',
-  files: { carriers: [], joinCarriers: [] },
-  pass: '', pass2: '',
-  passList: '', recursive: false, namesOnly: false, bulk: null,
-  mode: 'match', parity: 16, rate: 10, k: 2,
-  task: 'split', style: 'syslog', order: 4, message: '',
-  out: '', saveText: '',
+  tab: 'hide',
+  hide: { payloads: [], covers: [], text: false, message: '', second: null, same: false, pass: '', confirm: '', confirm2: '', k: 2, layout: 'auto' },
+  reveal: { files: [], passes: [], draft: '' },
+  analyze: { files: [] },
+  opts: { mode: 'match', parity: 16, rate: 10, kdf: 'standard', naming: 'keyed', pattern: '{name}_{n}', outDir: '', overwrite: false, style: 'syslog', order: 4, recursive: false, namesOnly: false },
   styles: [],
-  preview: null, previewError: null, previewing: false,
-  pix: null, view: 'stego', pixError: null,
-  real: null,
-  report: null, reportB: null, analyzing: null,
-  textOut: null, textRecovered: null, textEstimate: null,
-  busy: false, log: [], step: '',
-  started: Date.now(),
+  prev: null, prevError: null, previewing: false,
+  result: null, busy: false, progress: '',
 };
-let previewSeq = 0, viewsSeq = 0, previewTimer = null, viewsTimer = null, estimateTimer = null;
+let focusZone = 'payloads', sel = { list: 'payloads', i: -1 }, sortBy = {}, showPass = false, typing = false, typedDraft = '', typedCount = 0;
+const openSec = {};
+const secOpen = (k, def) => ((k in openSec ? openSec[k] : def) ? 'open' : '');
+document.addEventListener('toggle', (e) => { const d = e.target; if (d.dataset && d.dataset.sec) openSec[d.dataset.sec] = d.open; }, true);
 
-const op = () => OPS.find((o) => o.id === S.op);
-// The job the current screen will run. Hide picks embed / hidden / text from what the person chose;
-// Reveal tells image-or-audio files from text files.
-function mode() {
-  if (S.op === 'hide') return S.cover === 'text' ? 'text' : S.second || S.twoSlot ? 'hidden' : 'embed';
-  if (S.op === 'reveal') { const f = S.files.carrier; return f && f.kind !== 'carrier' ? 'textreveal' : 'reveal'; }
-  return S.op;
+const layoutName = { auto: 'Auto', split: 'Split', bulk: 'Bulk' };
+const layoutLabel = (k) => ({ single: 'One file', same: 'One file', two: 'Two secrets', split: 'Split', bulk: 'Bulk', text: 'Text' }[k] || k);
+const isText = (n) => TXT_EXT.includes(String(n).split('.').pop().toLowerCase());
+const baseName = (p) => String(p).split(/[\\/]/).pop();
+const bytesOf = (s) => new TextEncoder().encode(s).length;
+
+function toItem(e) {
+  const kind = e.kind === 'carrier' ? (AUD_EXT.includes(e.carrier) ? 'audio' : 'image') : e.kind === 'unusable' ? 'lossy' : isText(e.name) ? 'text' : 'other';
+  return { path: e.path, name: e.name, size: e.size, kind, carrier: e.carrier, summary: e.summary, samples: e.samples, note: e.note };
 }
-const isTextMode = () => mode() === 'text' || mode() === 'textreveal';
-const slotDefs = () => op().slots();
-const file = (id) => S.files[id] || null;
-const multi = (id) => slotDefs().some((s) => s[0] === id && s[3]);
+const accepts = (it, acc) => acc === 'any' || (acc === 'cover' && (it.kind === 'image' || it.kind === 'audio')) || (acc === 'image' && it.kind === 'image') || (acc === 'reveal' && (it.kind === 'image' || it.kind === 'audio' || it.kind === 'text'));
+const filtersFor = (acc) => (acc === 'cover' ? [{ name: 'Images and audio', extensions: IMG_EXT.concat(AUD_EXT) }] : acc === 'image' ? [{ name: 'Images', extensions: IMG_EXT }] : acc === 'reveal' ? [{ name: 'Images, audio and text', extensions: IMG_EXT.concat(AUD_EXT, TXT_EXT) }] : undefined);
+const LISTS = { payloads: ['hide', 'payloads', 'any'], covers: ['hide', 'covers', 'cover'], reveal: ['reveal', 'files', 'reveal'], analyze: ['analyze', 'files', 'image'] };
+const listOf = (key) => S[LISTS[key][0]][LISTS[key][1]];
 
-// ---------- helpers ----------
 function toast(m, o) {
   o = o || {};
   const t = $('#toast');
-  t.innerHTML = (o.icon || '') + '<span></span>';
+  t.innerHTML = (o.err ? ICON.warn : ICON.check) + '<span></span>';
   t.lastChild.textContent = m;
   t.classList.toggle('err', !!o.err);
   t.classList.add('on');
   clearTimeout(toast.h);
-  toast.h = setTimeout(() => t.classList.remove('on'), o.ms || 2200);
+  toast.h = setTimeout(() => t.classList.remove('on'), o.ms || 2400);
 }
-
 function celebrate(m) {
   const b = $('#logo');
-  b.classList.remove('wig');
-  void b.offsetWidth;
-  b.classList.add('wig');
-  toast(m, { icon: ICON.check });
+  b.classList.remove('wig'); void b.offsetWidth; b.classList.add('wig');
+  toast(m);
 }
-function logLine(text, kind) {
-  S.log.push({ t: (Date.now() - S.started) / 1000, text, kind: kind || 'd' });
-  if (S.log.length > 200) S.log.shift();
-  if (kind === 'r') toast(text, { err: true, ms: 7000 });
-  else if (S.busy && (!kind || kind === 'd')) { S.step = text; const m2 = $('#msg2'); if (m2) { m2.className = 'msg'; m2.textContent = text; } }
-}
+const msgOf = (e) => (typeof e === 'string' ? e : (e && e.message) || String(e));
 
-function entryOf(e) {
-  return { path: e.path, name: e.name, size: e.size, summary: e.summary, samples: e.samples, carrier: e.carrier, kind: e.kind };
-}
-
-function allowed(e, filter) {
-  if (e.kind === 'dir') return false;
-  if (filter === 'carrier') return e.kind === 'carrier';
-  if (filter === 'reveal') return e.kind === 'carrier' || e.kind === 'other';
-  if (filter === 'image') return e.kind === 'carrier' && !isAudio(e.carrier) && e.carrier !== 'jpeg';
-  return true;
-}
-
-function setErr(e) {
-  return typeof e === 'string' ? e : (e && e.message) || String(e);
-}
-
-// ---------- folder navigation ----------
-async function openDir(path) {
+// ---------------------------------------------------------------- adding files
+async function addPaths(key, paths) {
+  if (!paths || !paths.length) return;
+  const acc = LISTS[key][2];
   try {
-    S.listing = await api.listDir(path);
-    S.dir = S.listing.dir;
-    try { localStorage.setItem('stegosaur.dir', S.dir); } catch (e) { /* storage may be unavailable */ }
-  } catch (e) {
-    toast(setErr(e));
-    return false;
-  }
-  renderLeft();
-  return true;
+    const entries = await api.describe(paths, acc, S.opts.recursive && key === 'reveal');
+    const list = listOf(key), refused = [];
+    for (const e of entries) {
+      const it = toItem(e);
+      if (!accepts(it, acc)) { refused.push(it.name + (it.note ? ' (' + it.note + ')' : it.kind === 'lossy' ? ' (lossy format)' : '')); continue; }
+      if (!list.some((x) => x.path === it.path)) list.push(it);
+    }
+    if (refused.length) toast('Not used: ' + refused.slice(0, 3).join(', ') + (refused.length > 3 ? ' and ' + (refused.length - 3) + ' more' : ''), { err: true, ms: 5000 });
+    S.result = null;
+    changed();
+  } catch (e) { toast(msgOf(e), { err: true, ms: 6000 }); }
+}
+async function pickInto(key, folder) {
+  try {
+    const paths = folder ? await api.pickFolders('Choose a folder') : await api.pickFiles(key === 'payloads' ? 'Choose the files to hide' : 'Choose files', filtersFor(LISTS[key][2]));
+    await addPaths(key, paths);
+  } catch (e) { toast(msgOf(e), { err: true }); }
+}
+async function chooseSecond() {
+  try {
+    const paths = await api.pickFiles('Choose the second file', undefined);
+    if (!paths.length) return;
+    const entries = await api.describe([paths[0]], 'any', false);
+    if (entries[0]) { S.hide.second.file = toItem(entries[0]); S.result = null; changed(); }
+  } catch (e) { toast(msgOf(e), { err: true }); }
+}
+// A small window that collects lines one at a time (type or paste, Enter adds the line). Pasting several lines at once adds each.
+function pasteModal(onLines, o) {
+  o = o || {};
+  const lines = [];
+  const back = document.createElement('div');
+  back.className = 'modalb';
+  const draw = () => {
+    $('#pl', back).innerHTML = lines.map((l, i) => '<div class="prow"><span class="dim">' + (i + 1) + '</span><span class="pt" title="' + (o.secret ? '' : esc(l)) + '">' + (o.secret ? stars(l) : esc(l)) + '</span><button class="ico del" data-rm="' + i + '" title="Remove">' + ICON.close + '</button></div>').join('') || '<div class="prow dim">' + esc(o.empty || 'Nothing added yet.') + '</div>';
+    $('#pc', back).textContent = lines.length + (lines.length === 1 ? ' line' : ' lines');
+    const l = $('#pl', back); l.scrollTop = l.scrollHeight;
+  };
+  const addText = (t) => { for (const x of String(t).split(/\r?\n/)) { const v = o.secret ? x : x.trim().replace(/^"|"$/g, ''); if (v && !lines.includes(v)) lines.push(v); } };
+  back.innerHTML = '<div class="pk"><div class="pk-top"><b>' + esc(o.title || 'Paste paths') + '</b><button class="pk-x" data-x title="Cancel">' + ICON.close + '</button></div><div class="plist" id="pl"></div><div style="padding:8px 16px 14px"><div class="pwrow"><input class="in" id="pi" type="' + (o.secret ? 'password' : 'text') + '" autocomplete="off" spellcheck="false" placeholder="' + esc(o.placeholder || 'a full path, then Enter') + '"><button data-add title="Add">' + ICON.plus + '</button></div></div><div class="pk-foot"><span class="dim" id="pc"></span><span class="sp"></span><button class="btn ghost sm" data-x>Cancel</button><button class="btn sm" data-ok>Add all</button></div></div>';
+  document.body.appendChild(back);
+  draw();
+  const inp = $('#pi', back);
+  inp.focus();
+  const take = () => { if (inp.value) { addText(inp.value); inp.value = ''; draw(); } };
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); take(); } });
+  inp.addEventListener('paste', (e) => {
+    const t = (e.clipboardData || window.clipboardData).getData('text');
+    if (/\n/.test(t)) { e.preventDefault(); addText(t); draw(); }
+  });
+  back.addEventListener('click', (e) => {
+    if (e.target === back || e.target.closest('[data-x]')) { back.remove(); return; }
+    const rm = e.target.closest('[data-rm]'); if (rm) { lines.splice(+rm.dataset.rm, 1); draw(); return; }
+    if (e.target.closest('[data-add]')) { take(); inp.focus(); return; }
+    if (e.target.closest('[data-ok]')) { take(); const out = lines.slice(); back.remove(); if (out.length) onLines(out); }
+  });
 }
 
-function renderLeft() {
-  const l = S.listing;
-  const defs = slotDefs();
-  const filter = (defs.find((d) => d[0] === S.active) || [])[2];
-  const chosen = new Set([].concat(...defs.map((d) => S.files[d[0]]).map((f) => (Array.isArray(f) ? f : f ? [f] : []))).map((f) => f.path));
-  const rows = l
-    ? l.entries.map((e, i) => {
-        const ok = e.kind === 'dir' || (defs.length > 0 && allowed(e, filter));
-        const ik = e.kind === 'dir' ? 'folder' : e.kind === 'carrier' ? (isAudio(e.carrier) ? 'audio' : 'image') : e.kind === 'unusable' ? 'block' : 'file';
-        const icon = ICON[ik];
-        const extra = e.kind === 'dir' ? '' : e.kind === 'carrier' ? esc(e.summary || '') + ' · ' + fmt(e.size) : e.kind === 'unusable' ? (/lossy/i.test(e.note || '') ? 'lossy' : 'unusable') : fmt(e.size);
-        return `<div class="entry ${ok ? '' : 'off'} ${chosen.has(e.path) ? 'sel' : ''}" data-i="${i}" title="${esc(e.name)}${e.note ? ' - ' + esc(e.note) : ''}"><span class="ic k-${ik}">${icon}</span><span class="nm">${esc(e.name)}</span><small>${extra}</small></div>`;
-      }).join('')
-    : '<div class="help">Loading…</div>';
-  $('#left').innerHTML = `<div class="crumb"><button id="up" ${l && l.parent ? '' : 'disabled'} title="Up one folder">${ICON.up} Up</button><select id="roots" title="Jump to">${['<option value="">Jump to…</option>'].concat(S.roots.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`)).join('')}</select><button id="browse">Browse…</button></div><div class="path">${esc(S.dir || '')}</div><div class="files" id="files">${rows}</div>`;
-  $('#up').onclick = () => l && l.parent && openDir(l.parent);
-  $('#roots').onchange = (e) => e.target.value && openDir(e.target.value);
-  $('#browse').onclick = async () => {
-    try { const p = await api.pickFolder(); if (p) openDir(p); } catch (e) { toast(setErr(e)); }
-  };
-  $('#files').onclick = (e) => {
-    const row = e.target.closest('.entry');
-    if (!row || row.classList.contains('off')) return;
-    const entry = S.listing.entries[+row.dataset.i];
-    if (entry.kind === 'dir') openDir(entry.path); else pick(entry);
-  };
-}
-
-function pick(entry) {
-  const def = slotDefs().find((d) => d[0] === S.active);
-  if (!def || !allowed(entry, def[2])) return;
-  const f = entryOf(entry);
-  if (def[3]) {
-    const list = S.files[def[0]];
-    if (!list.some((x) => x.path === f.path)) list.push(f);
+// ---------------------------------------------------------------- the Hide plan
+function plan() {
+  const h = S.hide, N = h.payloads.length, M = h.covers.length;
+  const out = { kind: null, problems: [], headline: '' };
+  if (h.text) {
+    out.kind = 'text';
+    out.headline = 'Turns your message into ordinary-looking text.';
+    if (!h.message.trim()) out.problems.push('Type the message to hide.');
   } else {
-    S.files[def[0]] = f;
-    const next = slotDefs().find((d) => (d[3] ? S.files[d[0]].length === 0 : !S.files[d[0]]));
-    if (next) S.active = next[0];
+    if (!N) out.problems.push('Choose what to hide.');
+    if (!M) out.problems.push('Choose where to hide it.');
+    if (N === 1 && M === 1) out.kind = h.second ? 'two' : h.same ? 'same' : 'single';
+    else if (N === 1 && M > 1) out.kind = 'split';
+    else if (N > 1 && M >= N) out.kind = 'bulk';
+    else if (N > 1 && M >= 1) out.problems.push(N + ' files need ' + N + ' covers. You chose ' + M + '. Add ' + (N - M) + ' more cover(s).');
+    out.headline = { single: 'Hides one file in one cover.', same: 'Hides one file. The cover looks the same whether it holds one secret, two or none.', two: 'Hide two files in one cover', split: 'Hide data in many pieces', bulk: 'Hides each of the ' + N + ' files in its own cover, in the order shown.' }[out.kind] || '';
+    const want = { split: [N === 1 && M > 1, 'needs 1 file and 2 or more covers'], bulk: [N > 1 && M >= N, 'needs 2 or more files and at least as many covers'] }[h.layout];
+    if (want && !want[0] && N && M) out.problems.unshift('Layout "' + h.layout + '" ' + want[1] + ' (you have ' + N + ' file(s), ' + M + ' cover(s)).');
+    if (h.second && !h.second.file) out.problems.push('Choose the second file.');
   }
-  onChange(true);
-}
-
-function clearSlot(id, index) {
-  if (Array.isArray(S.files[id])) S.files[id].splice(index, 1); else delete S.files[id];
-  onChange(true);
-}
-
-// ---------- the right-hand inspector ----------
-function slotsHTML(keep) {
-  return slotDefs().filter((d) => !keep || keep(d)).map(([id, label, , isMulti]) => {
-    const on = S.active === id;
-    let body;
-    if (isMulti) {
-      const list = S.files[id];
-      body = list.length
-        ? list.map((f, i) => `<div class="v"><span>${esc(f.name)}</span><button class="x" data-rm="${id}:${i}" title="Remove">${ICON.close}</button></div>`).join('')
-        : '<div class="v empty">click files on the left to add</div>';
-    } else {
-      const f = S.files[id];
-      body = f ? `<div class="v"><span>${esc(f.name)} <span class="more">${f.size != null ? fmt(f.size) : ''}</span></span><button class="x" data-rm="${id}:0" title="Clear">${ICON.close}</button></div>` : '<div class="v empty">click a file on the left</div>';
-    }
-    return `<div class="slot ${on ? 'on' : ''}" data-slot="${id}"><div class="t">${esc(label)}</div>${body}</div>`;
-  }).join('');
-}
-
-const seg = (id, opts, val) => `<div class="seg" id="${id}" style="width:100%">${opts.map(([k, l]) => `<button style="flex:1" class="${val === k ? 'on' : ''}" data-v="${k}">${l}</button>`).join('')}</div>`;
-const field = (label, inner, id) => `<div class="field"><label>${label} <b id="${id || ''}"></b></label>${inner}</div>`;
-const passInput = (id, label, value) => field(`${label}`, `<input class="in" id="${id}" type="password" autocomplete="off" value="${esc(value)}"><div class="meter" style="margin:6px 0 0"><div class="bar"><i id="${id}-m" style="width:0"></i></div></div>`, id + '-w');
-
-function renderRight() {
-  const m = mode();
-  const modeF = field('Mode', seg('mode', [['match', 'match (recommended)'], ['replace', 'replace']], S.mode), 'mode-v');
-  const parF = field('Error correction', `<input id="parity" type="range" min="0" max="64" step="2" value="${S.parity}">`, 'parity-v');
-  const rateF = field('Slot size', `<input id="rate" type="range" min="2" max="30" value="${S.rate}">`, 'rate-v');
-  const outF = (label, ph) => field(label, `<input class="in" id="out" type="text" placeholder="${esc(ph)}" value="${esc(S.out)}">`);
-  const saveF = (label) => field(label, `<input class="in" id="save" type="text" value="${esc(S.saveText)}">`);
-  const styleF = () => {
-    const sty = S.styles.find((x) => x.id === S.style) || { adjustable_order: false };
-    let x = field('Style', `<select id="style">${S.styles.map((o) => `<option value="${o.id}" ${o.id === S.style ? 'selected' : ''}>${o.id}</option>`).join('')}</select>`);
-    if (sty.adjustable_order) x += field('Realism (context order)', `<input id="order" type="range" min="1" max="6" value="${S.order}">`, 'order-v');
-    return x;
-  };
-  let h = '', P = '', R = '';
-  if (S.op === 'hide') {
-    h += `<h4>Hide it in</h4><div class="field">${seg('cover', [['file', 'Image or audio'], ['text', 'Generated text']], S.cover)}</div>`;
-    if (m === 'text') {
-      h += '<h4>Message</h4>' + styleF() + field('Message', `<textarea id="msg" placeholder="type what to hide">${esc(S.message)}</textarea>`);
-      P = passInput('pass', 'Passphrase', S.pass);
-      R = saveF('Save to file (optional)');
-    } else {
-      h += `<h4>Files</h4>${slotsHTML((d) => d[0] !== 'hidden')}` +
-        `<div class="row"><div class="grow"><b>Also hide a second file</b><small>It gets its own passphrase. Each one opens only its own file.</small></div><div class="sw ${S.second ? 'on' : ''}" id="second" role="switch" aria-checked="${S.second}" tabindex="0"></div></div>` +
-        (S.second ? '' : `<label class="check"><input type="checkbox" id="twoslot" ${S.twoSlot ? 'checked' : ''}><span>Look the same whether or not a second file is hidden</span></label>`);
-      if (S.second) h += slotsHTML((d) => d[0] === 'hidden');
-      P = passInput('pass', S.second ? 'First passphrase' : 'Passphrase', S.pass) + (S.second ? passInput('pass2', 'Second passphrase', S.pass2) : '');
-      R = modeF + parF + (S.second || S.twoSlot ? rateF : '') + outF('Save as', 'auto: camera-style name');
-    }
-  } else if (S.op === 'bulk') {
-    h += '<h4>Folder</h4><div class="slot on"><div class="t">Looks through</div><div class="v"><span>' + esc(S.dir || '') + '</span></div></div><div class="help">The folder shown on the left. Change it there. Every image and audio file in it is checked with every passphrase below.</div>';
-    P = field('One passphrase per line', '<textarea class="in pwlist" id="passlist" autocomplete="off" spellcheck="false" placeholder="one passphrase per line">' + esc(S.passList) + '</textarea>', 'passlist-w');
-    R = '<label class="check"><input type="checkbox" id="recursive" ' + (S.recursive ? 'checked' : '') + '><span>Also look inside sub-folders</span></label>' +
-      '<label class="check"><input type="checkbox" id="namesonly" ' + (S.namesOnly ? 'checked' : '') + '><span>Only try a passphrase on files whose name matches it (faster; needs files named by this tool)</span></label>' +
-      outF('Save recovered files in', 'auto: a "recovered" folder inside this folder');
-  } else if (S.op === 'reveal') {
-    h += `<h4>Read from</h4>${slotsHTML()}`;
-    P = passInput('pass', 'Passphrase', S.pass);
-    R = m === 'textreveal' ? styleF() + saveF('Save recovered message to (optional)') : parF + rateF + outF('Save recovered file as', 'auto: <name>.recovered.bin');
-  } else {
-    h += `<h4>Files</h4>${slotsHTML()}`;
-    if (S.op === 'split') h += `<div class="field" style="padding-top:10px">${seg('task', [['split', 'Split a secret'], ['join', 'Join shares']], S.task)}</div>`;
-    if (S.op === 'analyze') R = '<div class="help">Estimates how much of an image carries a hidden message (chi-square, RS and SPA). Add an original to compare.</div>';
-    if (S.op === 'split') {
-      P = passInput('pass', 'Passphrase', S.pass);
-      if (S.task === 'join') R = parF + outF('Save recovered file as', 'auto: recovered.bin next to the first image');
-      else R = field('Shares needed (k)', `<input id="k" type="range" min="1" max="${Math.max(1, S.files.carriers.length)}" value="${Math.min(S.k, Math.max(1, S.files.carriers.length))}">`, 'k-v') + modeF + parF + outF('Save shares in', 'auto: next to the first image');
-    }
+  if (!h.pass) out.problems.push('Enter a passphrase.');
+  else if (h.pass !== h.confirm) out.problems.push(h.confirm ? 'The two passphrase boxes do not match.' : 'Type the passphrase again to confirm it.');
+  if (h.second) {
+    if (!h.second.pass) out.problems.push('Enter the second passphrase.');
+    else if (h.second.pass !== h.confirm2) out.problems.push(h.confirm2 ? 'The second passphrase boxes do not match.' : 'Type the second passphrase again to confirm it.');
+    else if (h.second.pass === h.pass) out.problems.push('The two passphrases must differ.');
   }
-  if (P) h += '<h4>Passphrase</h4>' + P;
-  h += '<h4 id="caph">Preview</h4><div id="dyn"></div>';
-  if (R) h += '<h4>Settings</h4>' + R;
-  h += '<div class="runbar"><div class="msg" id="msg2"></div><button class="btn" id="run"></button></div>';
-  $('#right').innerHTML = h;
-  bindRight();
-  updateDynamic();
+  if (S.prev && S.prev.items) for (const it of S.prev.items) if (it.error) { out.problems.push(it.error); break; } else if (it.fits === false) { out.problems.push('A file is too big for its cover.'); break; }
+  if (S.prevError) out.problems.push(S.prevError);
+  return out;
 }
-
-function bindRight() {
-  const on = (id, ev, fn) => { const e = $('#' + id); if (e) e.addEventListener(ev, fn); };
-  $('#right').onclick = (e) => {
-    const rm = e.target.closest('[data-rm]');
-    if (rm) { e.stopPropagation(); const [id, i] = rm.dataset.rm.split(':'); clearSlot(id, +i); return; }
-    const slot = e.target.closest('[data-slot]');
-    if (slot) { S.active = slot.dataset.slot; renderRight(); renderLeft(); }
-  };
-  on('pass', 'input', (e) => { S.pass = e.target.value; touch(); });
-  on('pass2', 'input', (e) => { S.pass2 = e.target.value; touch(); });
-  on('passlist', 'input', (e) => { S.passList = e.target.value; touch(); });
-  on('recursive', 'change', (e) => { S.recursive = e.target.checked; });
-  on('namesonly', 'change', (e) => { S.namesOnly = e.target.checked; });
-  on('out', 'input', (e) => { S.out = e.target.value; touch(); });
-  on('save', 'input', (e) => { S.saveText = e.target.value; touch(); });
-  on('parity', 'input', (e) => { S.parity = +e.target.value; S.real = null; changedParams(); });
-  on('rate', 'input', (e) => { S.rate = +e.target.value; S.real = null; changedParams(); });
-  on('k', 'input', (e) => { S.k = +e.target.value; changedParams(); });
-  on('order', 'input', (e) => { S.order = +e.target.value; S.textOut = null; changedParams(); });
-  on('msg', 'input', (e) => { S.message = e.target.value; S.textOut = null; changedParams(); });
-  on('style', 'change', (e) => { S.style = e.target.value; const st = S.styles.find((s) => s.id === S.style); if (st) S.order = st.default_order; S.textOut = null; renderRight(); changedParams(); });
-  const segClick = (id, fn) => { const el = $('#' + id); if (el) el.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) fn(b.dataset.v); }); };
-  segClick('cover', (v) => { S.cover = v; S.active = slotDefs()[0] ? slotDefs()[0][0] : null; S.preview = null; S.previewError = null; S.pix = null; S.real = null; renderChips(); renderRight(); renderLeft(); renderCenter(); schedulePreview(); scheduleEstimate(); });
-  const sw = $('#second');
-  if (sw) {
-    const flip = () => { S.second = !S.second; if (!S.second) delete S.files.hidden; S.active = slotDefs().find((d) => !S.files[d[0]]) ? slotDefs().find((d) => !S.files[d[0]])[0] : S.active; S.real = null; onChange(true); };
-    sw.onclick = flip;
-    sw.onkeydown = (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); flip(); } };
-  }
-  on('twoslot', 'change', (e) => { S.twoSlot = e.target.checked; S.real = null; renderRight(); changedParams(); });
-  segClick('mode', (v) => { S.mode = v; S.real = null; renderRight(); changedParams(); });
-  segClick('task', (v) => { S.task = v; S.out = ''; S.active = slotDefs()[0] ? slotDefs()[0][0] : null; renderRight(); renderLeft(); changedParams(); });
-  $('#run').onclick = run;
-}
-
-// ---------- problems, parameters, request building ----------
 function problems() {
-  const p = [];
-  const need = (id, msg) => { if (!file(id)) p.push(msg); };
-  const m = mode();
-  if (m === 'embed' || m === 'hidden') {
-    need('carrier', 'Choose a cover file.'); need('payload', 'Choose the file to hide.');
-    if (!S.pass) p.push(S.second ? 'Enter the first passphrase.' : 'Enter a passphrase.');
-    if (S.second) { need('hidden', 'Choose the second file.'); if (!S.pass2) p.push('Enter the second passphrase.'); else if (S.pass && S.pass === S.pass2) p.push('The two passphrases must differ.'); }
-  }
-  if (m === 'reveal' || m === 'textreveal') { need('carrier', 'Choose the file to read.'); if (!S.pass) p.push('Enter the passphrase.'); }
-  if (m === 'analyze') { need('image', 'Choose an image to scan.'); }
-  if (m === 'bulk') { if (!S.dir) p.push('Choose a folder on the left.'); if (!passList().length) p.push('Enter at least one passphrase.'); }
-  if (m === 'split') {
-    if (S.task === 'join') { if (!S.files.joinCarriers.length) p.push('Add the images that hold shares.'); if (!S.pass) p.push('Enter the passphrase.'); }
-    else { need('secret', 'Choose the secret file.'); if (!S.files.carriers.length) p.push('Add at least one carrier image.'); if (!S.pass) p.push('Enter the passphrase.'); }
-  }
-  if (m === 'text' && !S.message) p.push('Type a message to hide.');
-  if (m === 'text' && !S.pass) p.push('Enter the passphrase.');
-  if (S.preview && S.preview.error) p.push(S.preview.error);
-  if (S.previewError) p.push(S.previewError);
-  return p;
+  if (S.tab === 'hide') return plan().problems;
+  if (S.tab === 'reveal') { const p = []; if (!S.reveal.files.length) p.push('Choose the files to open.'); if (!S.reveal.passes.length && !S.reveal.draft) p.push('Add at least one passphrase.'); return p; }
+  return S.analyze.files.length ? [] : ['Choose the images to scan.'];
 }
 
-const passList = () => S.passList.split('\n').map((x) => x.replace(/\r$/, '')).filter((x) => x.length > 0);
-
-function cfgFields() {
-  return { mode: S.mode, parity: S.parity, rate: S.rate / 100 };
-}
-
-function previewReq(measure) {
-  const c = cfgFields();
-  const m = mode();
-  if (m === 'embed' && file('carrier')) return { op: 'embed', carrier: file('carrier').path, payload_len: file('payload') ? file('payload').size : 0, ...c, measure };
-  if (m === 'hidden' && file('carrier')) return { op: 'hidden', carrier: file('carrier').path, payload_len: file('payload') ? file('payload').size : 0, hidden_len: S.second && file('hidden') ? file('hidden').size : null, ...c, measure };
-  if (m === 'split' && S.task === 'split' && S.files.carriers.length && file('secret')) return { op: 'split', carriers: S.files.carriers.map((f) => f.path), secret_len: file('secret').size, k: Math.min(S.k, S.files.carriers.length), ...c };
-  return null;
-}
-
-function viewsReq() {
-  const c = cfgFields();
-  const base = { max_dim: 640, ...c };
-  const m = mode();
-  if ((m === 'embed' || m === 'hidden') && file('carrier')) {
-    const car = file('carrier');
-    if (S.real && S.real.carrier === car.path) return { ...base, op: m, carrier: car.path, stego: S.real.output };
-    if (file('payload') && S.preview && S.preview.fits) return { ...base, op: m, carrier: car.path, payload_len: file('payload').size, hidden_len: m === 'hidden' && S.second && file('hidden') ? file('hidden').size : null };
-    return { ...base, op: 'embed', carrier: car.path, stego: car.path };
-  }
-  if (m === 'reveal' && file('carrier')) return { ...base, op: 'embed', carrier: file('carrier').path, stego: file('carrier').path };
-  if (m === 'analyze' && file('image')) return { ...base, op: 'embed', carrier: (file('compare') || file('image')).path, stego: file('image').path };
-  if (m === 'split' && S.task === 'split' && S.files.carriers[0] && file('secret') && S.preview && S.preview.fits) return { ...base, op: 'embed', carrier: S.files.carriers[0].path, payload_len: file('secret').size + 48 };
-  if (m === 'split' && S.files[S.task === 'join' ? 'joinCarriers' : 'carriers'][0]) { const f = S.files[S.task === 'join' ? 'joinCarriers' : 'carriers'][0]; return { ...base, op: 'embed', carrier: f.path, stego: f.path }; }
-  return null;
-}
-
-// ---------- change handling ----------
-function touch() { updateDynamic(); }
-
-function changedParams() {
-  updateDynamic();
-  schedulePreview();
-  scheduleEstimate();
-}
-
-function onChange(rerender) {
-  if (rerender) { renderRight(); renderLeft(); }
-  S.report = null; S.reportB = null;
-  schedulePreview();
-  scheduleEstimate();
-  renderCenter();
-}
-
-function schedulePreview() {
-  clearTimeout(previewTimer);
-  previewTimer = setTimeout(doPreview, 150);
-  clearTimeout(viewsTimer);
-  viewsTimer = setTimeout(doViews, 200);
-}
-
+// ---------------------------------------------------------------- capacity and risk, measured by Rust
+let prevSeq = 0, prevTimer = null;
+function schedulePreview() { clearTimeout(prevTimer); prevTimer = setTimeout(doPreview, 220); }
 async function doPreview() {
-  const seq = ++previewSeq;
-  const req = previewReq(true);
-  if (!req) { S.preview = null; S.previewError = null; S.previewing = false; updateDynamic(); clearTimeout(viewsTimer); viewsTimer = setTimeout(doViews, 0); return; }
-  S.previewing = true; updateDynamic();
+  const seq = ++prevSeq;
+  const p = plan(), h = S.hide, o = S.opts;
+  if (S.tab !== 'hide' || !p.kind || p.kind === 'text') { S.prev = null; S.prevError = null; render(); return; }
+  const base = { mode: o.mode, parity: o.parity, rate: o.rate / 100 };
+  S.previewing = true;
   try {
-    const r = await api.preview(req);
-    if (seq !== previewSeq) return;
-    S.preview = r; S.previewError = null;
+    let items = [];
+    if (p.kind === 'single') {
+      const r = await api.preview({ op: 'embed', carrier: h.covers[0].path, payload_len: h.payloads[0].size, ...base, measure: true });
+      items = [{ cap: r.capacity, fits: r.fits, fill: r.fill, score: r.measured ? r.measured.after.score : null, note: r.detect_note, error: r.error }];
+    } else if (p.kind === 'same' || p.kind === 'two') {
+      const r = await api.preview({ op: 'hidden', carrier: h.covers[0].path, payload_len: h.payloads[0].size, hidden_len: p.kind === 'two' && h.second.file ? h.second.file.size : null, ...base, measure: true });
+      const big = Math.max(h.payloads[0].size, p.kind === 'two' && h.second.file ? h.second.file.size : 0);
+      items = [{ cap: r.capacity, fits: r.public_fits !== false && r.hidden_fits !== false, fill: r.capacity ? Math.min(1, big / r.capacity) : 1, score: r.measured ? r.measured.after.score : null, note: r.detect_note, error: r.error }];
+    } else if (p.kind === 'split') {
+      const r = await api.preview({ op: 'split', carriers: h.covers.map((c) => c.path), secret_len: h.payloads[0].size, k: Math.min(h.k, h.covers.length), ...base });
+      const sl = r.split ? r.split.share_len : 0;
+      items = (r.split ? r.split.carriers : []).map((c) => ({ cap: c.capacity, fits: c.fits, fill: c.capacity ? Math.min(1, sl / c.capacity) : 1 }));
+      if (r.error) items.length && (items[0].error = r.error);
+    } else {
+      for (let i = 0; i < h.payloads.length; i++) {
+        const r = await api.preview({ op: 'embed', carrier: h.covers[i].path, payload_len: h.payloads[i].size, ...base, measure: false });
+        if (seq !== prevSeq) return;
+        items.push({ cap: r.capacity, fits: r.fits, fill: r.fill, score: null, error: r.error });
+      }
+    }
+    if (seq !== prevSeq) return;
+    S.prev = { kind: p.kind, items }; S.prevError = null;
   } catch (e) {
-    if (seq !== previewSeq) return;
-    S.preview = null; S.previewError = setErr(e);
+    if (seq !== prevSeq) return;
+    S.prev = null; S.prevError = msgOf(e);
   }
   S.previewing = false;
-  updateDynamic();
-  clearTimeout(viewsTimer);
-  viewsTimer = setTimeout(doViews, 0);
+  render();
+}
+function changed() { if (S.tab === 'hide') { S.prev = null; schedulePreview(); } render(); }
+
+// ---------------------------------------------------------------- pieces of the page
+const ib = (icon, act, arg, title, cls) => '<button class="ico ' + (cls || '') + '" data-act="' + act + '" ' + (arg != null ? 'data-arg="' + arg + '"' : '') + ' title="' + esc(title) + '">' + ICON[icon] + '</button>';
+const tb = (icon, label, act, title, pri) => '<button class="tbtn ' + (pri ? 'pri' : '') + '" data-act="' + act + '" title="' + esc(title || label) + '" aria-label="' + esc(title || label) + '">' + ICON[icon] + '</button>';
+const stars = (s) => '*'.repeat(Math.min(14, s.length));
+const sizeSum = (l) => fmt(l.reduce((a, f) => a + f.size, 0));
+const strengthOf = (v) => { const f = v.length < 8 ? 0.25 : v.length < 14 ? 0.6 : 1; return { f, label: v ? (f < 0.5 ? 'weak' : f < 1 ? 'okay' : 'strong') : '' }; };
+const strengthHead = (vals) => {
+  const used = vals.filter(Boolean);
+  const w = used.length ? Math.min(...used.map((v) => strengthOf(v).f)) : 0;
+  const lab = used.length ? strengthOf(used.reduce((a, b) => (strengthOf(a).f <= strengthOf(b).f ? a : b))).label : '';
+  return '<span class="sstrength" title="Passphrase strength"><span class="tiny">' + lab + '</span><span class="sbar"><i style="width:' + (used.length ? w * 100 : 0) + '%;background:' + (w < 0.5 ? 'var(--red)' : 'var(--green)') + '"></i></span></span>';
+};
+const confirmNote = (a, b) => (!b ? '' : a === b ? '<div class="tiny ok" style="margin-top:4px">' + ICON.check + ' Matches</div>' : '<div class="tiny" style="margin-top:4px;color:var(--red)">' + ICON.warn + ' Does not match yet</div>');
+const riskOf = (s) => (s < 12 ? ['low', 'Low'] : s < 35 ? ['mid', 'Medium'] : ['high', 'High']);
+const riskBlock = (score) => {
+  const [cls, label] = riskOf(score);
+  return '<div class="riskrow"><span class="lbl">Worst risk</span><span class="rk ' + cls + '">' + label + ' - ' + Math.round(score) + '/100</span></div><div class="gauge" style="min-width:0"><i style="left:' + Math.min(96, Math.max(3, score)) + '%"></i></div><div class="gcap"><span>Hard to spot</span><span>Easy to spot</span></div>';
+};
+const gaugeBar = (score) => '<div class="gauge"><i style="left:' + Math.min(96, Math.max(3, score)) + '%"></i></div>';
+const passRow = (id, bind, val, ph, cbind, cval) => '<div class="pwrow"><input class="in" id="' + id + '" type="' + (showPass ? 'text' : 'password') + '" autocomplete="off" data-bind="' + bind + '" value="' + esc(val) + '" placeholder="' + ph + '"><button data-showpass title="' + (showPass ? 'Hide' : 'Show') + ' passphrases">' + (showPass ? ICON.eyeOff : ICON.eye) + '</button></div><div class="pwrow" style="margin-top:7px"><input class="in" id="' + id + 'c" type="' + (showPass ? 'text' : 'password') + '" autocomplete="off" data-bind="' + cbind + '" value="' + esc(cval || '') + '" placeholder="re-enter"><button data-showpass title="' + (showPass ? 'Hide' : 'Show') + ' passphrases">' + (showPass ? ICON.eyeOff : ICON.eye) + '</button></div>' + confirmNote(val, cval || '');
+const rng = (id, label, min, max, val, extra, step, bind, dis) => '<label>' + label + '</label><div class="r"><input type="range" min="' + min + '" max="' + max + '" ' + (step ? 'step="' + step + '"' : '') + ' value="' + val + '" ' + (bind ? 'data-bind="' + bind + '"' : 'data-opt="' + id + '"') + ' ' + (dis ? 'disabled' : '') + '><span class="v">' + extra + '</span></div>';
+const segBtn = (cur, val, act, arg, label, title) => '<button class="' + (cur === val ? 'on' : '') + '" data-act="' + act + '" data-arg="' + arg + '"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + label + '</button>';
+const optSelect = (name, list, cur) => '<select class="in" data-opt="' + name + '">' + list.map(([v, l]) => '<option value="' + esc(v) + '" ' + (cur === v ? 'selected' : '') + '>' + esc(l) + '</option>').join('') + '</select>';
+
+function zoneShell(key, title, files, toolbar, body, cntText) {
+  return '<section class="zone ' + (focusZone === key ? 'focus' : '') + '" data-zone="' + key + '" tabindex="0"><header><h3>' + title + '</h3><span class="cnt">' + (cntText != null ? cntText : files.length + ' item' + (files.length === 1 ? '' : 's') + (files.length && typeof files[0] !== 'string' ? ', ' + sizeSum(files) : '')) + '</span><span class="sp"></span>' + toolbar + '</header><div class="zb">' + body + '</div></section>';
+}
+const emptyBody = (msg, add, dir, paste, extra) => '<div class="dropmsg"><div class="big">' + ICON.download + '</div><div>' + msg + '</div><div class="row2"><button class="tbtn pri" data-act="' + add + '" title="Add files" aria-label="Add files">' + ICON.filePlus + '</button><button class="tbtn" data-act="' + dir + '" title="Add a folder" aria-label="Add a folder">' + ICON.folderPlus + '</button><button class="tbtn" data-act="' + paste + '" title="Paste paths" aria-label="Paste paths">' + ICON.paste + '</button>' + (extra || '') + '</div></div>';
+const typeBtn = () => '<button class="tbtn ' + (typing ? 'pri' : '') + '" data-typetext title="Type a short message to hide, no file needed" aria-label="Type text">' + ICON.text + '</button>';
+const listToolbar = (key, add, dir, paste, files, extra) => tb('filePlus', 'Add', add, 'Add files') + tb('folderPlus', 'Folder', dir, 'Add a whole folder') + tb('paste', 'Paste', paste, 'Paste a list of paths') + (extra || '') + (files.length > 1 ? '<button class="tbtn ' + (sortBy[key] ? 'pri' : '') + '" data-sortz="' + key + '" title="Sort: ' + (sortBy[key] || 'as added') + ' (click to change)" aria-label="Sort">' + ICON.sort + '</button>' : '') + (files.length ? '<button class="tbtn" data-act="clearList" data-arg="' + key + '" title="Remove all">' + ICON.trash + '</button>' : '');
+const rowOps = (key, i) => ib('arrowUp', 'move', key + ':' + i + ':-1', 'Move up') + ib('arrowDown', 'move', key + ':' + i + ':1', 'Move down') + ib('close', 'dropList', key + ':' + i, 'Remove', 'del');
+const rowAttrs = (key, i) => 'data-row="' + i + '" data-rk="' + key + '" class="' + (sel.list === key && sel.i === i ? 'sel' : '') + '"';
+const icFor = (f) => '<span class="ic k-' + f.kind + '">' + (ICON[f.kind] || ICON.other) + '</span>';
+function sorted(key, files) {
+  const arr = files.map((f, i) => ({ f, i })), s = sortBy[key];
+  if (s) arr.sort((a, b) => (s === 'name' ? a.f.name.localeCompare(b.f.name) : b.f.size - a.f.size));
+  return arr;
+}
+const typedEditor = () => (typing ? '<div class="typed"><label class="l">Message to hide</label><textarea class="in" id="typed" placeholder="Type or paste the text to hide" style="height:96px">' + esc(typedDraft) + '</textarea><div class="tiny" id="typedcount" style="margin-top:4px">' + typedInfo() + '</div><div class="row2"><button class="tbtn pri" data-typeadd title="Add the message" aria-label="Add message">' + ICON.check + '</button><button class="tbtn" data-typecancel title="Cancel" aria-label="Cancel">' + ICON.close + '</button></div></div>' : '');
+const typedInfo = () => typedDraft.length + ' characters, ' + bytesOf(typedDraft) + ' bytes. 1 KB holds about 1,000 characters.';
+
+// ---------------------------------------------------------------- Hide
+function hideZones() {
+  const h = S.hide, p = plan(), res = S.result && S.result.tab === 'hide' ? S.result.items : null;
+  const split = p.kind === 'split', items = (S.prev && S.prev.items) || [];
+  const n = Math.max(h.payloads.length, h.covers.length);
+  const left = h.text
+    ? zoneShell('payloads', 'Hide', [], '', '<div style="padding:10px"><label class="l">Message to hide</label><textarea class="in" id="msg" data-bind="hide.message" style="height:150px" placeholder="Type the message to hide">' + esc(h.message) + '</textarea><div class="tiny" style="margin-top:4px">' + bytesOf(h.message) + ' bytes</div></div>', bytesOf(h.message) + ' bytes')
+    : zoneShell('payloads', 'Hide', h.payloads, listToolbar('payloads', 'addPayload', 'addPayloadDir', 'pastePayload', h.payloads, typeBtn()),
+      typedEditor() + (h.payloads.length ? '<table><thead><tr><th></th><th>#</th><th>File</th><th>Size</th><th></th></tr></thead><tbody>' + sorted('payloads', h.payloads).map(({ f, i }) => '<tr ' + rowAttrs('payloads', i) + '><td class="grip">' + ICON.grip + '</td><td class="dim">' + (i + 1) + '</td><td class="nm" title="' + esc(f.path) + '">' + icFor(f) + ' ' + esc(f.name) + '</td><td class="dim">' + fmt(f.size) + '</td><td class="act">' + rowOps('payloads', i) + '</td></tr>').join('') + '</tbody></table>' : (typing ? '' : emptyBody('Drop the stuff to hide here', 'addPayload', 'addPayloadDir', 'pastePayload', typeBtn()))));
+  const gen = S.result && S.result.tab === 'hide' && S.result.text != null ? S.result.text : null;
+  let right;
+  if (h.text && gen != null) right = zoneShell('covers', 'Cover text', [], '<button class="tbtn" data-copytext title="Copy the text" aria-label="Copy">' + ICON.copy + '</button><button class="tbtn pri" data-savetext title="Save as a .txt file" aria-label="Save">' + ICON.download + '</button>', '<div class="textout">' + esc(gen) + '</div>', gen.split('\n').length + ' lines, ' + gen.split(/\s+/).filter(Boolean).length + ' words');
+  else if (h.text) right = zoneShell('covers', 'Cover', [], '', '<div class="dropmsg"><div class="big">' + ICON.text + '</div><div>Generated text is the cover.<br>Style and realism are in the panel.</div></div>');
+  else right = zoneShell('covers', 'Cover(s)', h.covers, listToolbar('covers', 'addCover', 'addCoverDir', 'pasteCover', h.covers),
+    h.covers.length ? '<table><thead><tr><th></th><th>#</th><th>Cover</th><th>Holds</th><th>Fill</th><th>' + (res ? 'Saved as' : 'Risk') + '</th><th></th></tr></thead><tbody>' + sorted('covers', h.covers).map(({ f, i }) => {
+      const it = items[i], rr = res && (split ? res[i] : p.kind === 'bulk' ? res[i] : res[0]);
+      const showRes = rr && (rr.output || rr.error);
+      return '<tr ' + rowAttrs('covers', i) + '><td class="grip">' + ICON.grip + '</td><td class="dim">' + (i + 1) + '</td><td class="nm" title="' + esc(f.path) + '">' + icFor(f) + ' ' + esc(f.name) + '</td><td class="dim">' + (it ? fmt(it.cap) : '') + '</td><td style="min-width:70px">' + (it ? '<div class="fillbar" title="' + Math.round(it.fill * 100) + '%"><i class="' + (it.fits ? '' : 'bad') + '" style="width:' + Math.max(3, Math.round(it.fill * 100)) + '%"></i></div>' : '') + '</td><td>' + (showRes ? (rr.error ? '<span class="tiny" style="color:var(--red)" title="' + esc(rr.error) + '">' + esc(rr.error.slice(0, 34)) + '</span>' : '<span class="mono ok">' + esc(baseName(rr.output)) + '</span>') : it && it.score != null ? '<span class="rk ' + riskOf(it.score)[0] + '">' + Math.round(it.score) + '</span>' : it && it.fits === false ? '<span class="tiny">too big</span>' : '') + '</td><td class="act">' + rowOps('covers', i) + '</td></tr>';
+    }).join('') + '</tbody></table>' : emptyBody('Choose images or audio as the cover', 'addCover', 'addCoverDir', 'pasteCover'));
+  return [left, right];
 }
 
-async function doViews() {
-  const seq = ++viewsSeq;
-  const req = viewsReq();
-  if (!req) { S.pix = null; S.pixError = null; renderCenter(); return; }
-  try {
-    const b = await api.views(req);
-    if (seq !== viewsSeq) return;
-    const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
-    const w = dv.getUint32(0, true), h = dv.getUint32(4, true), changed = dv.getFloat32(8, true);
-    const n = w * h * 4;
-    const slice = (i) => new Uint8ClampedArray(b.buffer.slice(b.byteOffset + 12 + i * n, b.byteOffset + 12 + (i + 1) * n));
-    S.pix = { w, h, changed, stego: slice(1), orig: slice(0), diff: slice(2), lsb: slice(3) };
-    S.pixError = null;
-  } catch (e) {
-    if (seq !== viewsSeq) return;
-    S.pix = null; S.pixError = setErr(e);
-  }
-  renderCenter();
+function secondSection(h) {
+  const f = h.second.file;
+  const slot = f
+    ? '<div class="slot2 full" data-zone="second">' + icFor(f) + '<span class="s2n" title="' + esc(f.path) + '"><b>' + esc(f.name) + '</b><small>' + fmt(f.size) + '</small></span><button class="tbtn" data-act="chooseSecond" title="Pick a different file" aria-label="Replace">' + ICON.filePlus + '</button><button class="ico del" data-act="removeSecond" title="Remove">' + ICON.close + '</button></div>'
+    : '<div class="slot2" data-zone="second" data-act="chooseSecond" role="button" tabindex="0"><span class="s2i">' + ICON.download + '</span><span class="s2n"><b>Choose the second file</b><small>Click to browse, or drop a file here</small></span></div>';
+  return '<div class="sec"><h4>' + ICON.filePlus + 'Second secret' + strengthHead([h.second.pass]) + '</h4>' + slot + '<div style="margin-top:8px">' + passRow('pass2', 'hide.pass2', h.second.pass, 'second passphrase', 'hide.confirm2', h.confirm2) + '</div></div>';
 }
 
-function scheduleEstimate() {
-  clearTimeout(estimateTimer);
-  if (mode() !== 'text') { S.textEstimate = null; return; }
-  estimateTimer = setTimeout(async () => {
-    if (!S.message) { S.textEstimate = null; updateDynamic(); return; }
-    try { S.textEstimate = await api.textEstimate({ style: S.style, order: S.order, len: new TextEncoder().encode(S.message).length }); } catch (e) { S.textEstimate = null; }
-    updateDynamic();
-  }, 150);
+function hidePanel() {
+  const h = S.hide, o = S.opts;
+  let p = plan();
+  if (h.second && !['single', 'two', 'same'].includes(p.kind) && !h.text) { h.second = null; p = plan(); }
+  const pr = p.problems, items = (S.prev && S.prev.items) || [];
+  const totalNeed = p.kind === 'split' ? 0 : items.length ? h.payloads.slice(0, items.length).reduce((a, f) => a + f.size, 0) : 0;
+  const totalCap = items.reduce((a, i) => a + i.cap, 0);
+  const worst = items.some((i) => i.score != null) ? Math.max(...items.filter((i) => i.score != null).map((i) => i.score)) : null;
+  const layoutDesc = { split: 'Hide data in many pieces', bulk: 'Many files. Each one goes into its own cover.' }[h.layout] || (p.headline || 'Picks the layout from what you chose.');
+  const head = h.layout === 'auto' ? (p.kind ? 'Layout: ' + layoutLabel(p.kind) : 'Layout') : 'Layout';
+  const style = S.styles.find((x) => x.id === o.style) || { adjustable_order: false };
+  const done = S.result && S.result.tab === 'hide';
+  return '<div class="pb">' +
+    '<div class="sec"><h4>' + ICON.layers + head + '</h4><div class="seg full">' + ['auto', 'split', 'bulk'].map((k) => segBtn(h.layout, k, 'setLayout', k, layoutName[k], '')).join('') + '</div><div class="tiny" style="margin-top:6px;line-height:1.4">' + esc(layoutDesc) + '</div>' +
+    (['single', 'two', 'same'].includes(p.kind) && !h.text ? '<div class="row" style="padding:10px 0 0"><div class="grow"><b>Second secret</b></div><div class="sw ' + (h.second ? 'on' : '') + '" id="secondsw" data-act="toggleSecond" role="switch" aria-checked="' + !!h.second + '"></div></div>' : '') +
+    '<div class="kv" style="margin-top:8px"><label>Cover is</label><div class="seg full"><button class="' + (!h.text ? 'on' : '') + '" ' + (h.text ? 'data-act="toggleText"' : '') + '>File</button><button class="' + (h.text ? 'on' : '') + '" ' + (!h.text ? 'data-act="toggleText"' : '') + '>Text</button></div>' +
+    (p.kind === 'split' ? rng('k', 'Needed (K)', 1, h.covers.length, Math.min(h.k, h.covers.length), Math.min(h.k, h.covers.length) + '/' + h.covers.length, 0, 'hide.k') : '') + '</div></div>' +
+    '<div class="sec"><h4>' + ICON.key + (h.second ? 'First passphrase' : 'Passphrase') + strengthHead([h.pass]) + '</h4>' + passRow('pass', 'hide.pass', h.pass, 'passphrase', 'hide.confirm', h.confirm) + '</div>' +
+    (h.second ? secondSection(h) : '') +
+    '<details class="sec" data-sec="adv" ' + secOpen('adv', h.same) + '><summary>' + CHEV + ICON.sliders + 'Advanced<span class="tag">' + (o.mode === 'match' ? 'careful' : 'simple') + ', parity ' + o.parity + '</span></summary><div class="kv">' +
+    '<label>Method</label><div class="seg full">' + segBtn(o.mode, 'match', 'setOpt', 'mode=match', 'Careful', 'Harder to detect (recommended)') + segBtn(o.mode, 'replace', 'setOpt', 'mode=replace', 'Simple', 'Simpler, but easier to detect') + '</div>' +
+    rng('parity', 'Parity', 0, 64, o.parity, o.parity ? o.parity + ' B' : 'off', 2) +
+    rng('rate', 'Slot size', 2, 30, o.rate, o.rate + '%', 0, null, !(p.kind === 'two' || p.kind === 'same')) +
+    '<label>KDF</label>' + optSelect('kdf', [['standard', 'Standard'], ['strong', 'Strong']], o.kdf) +
+    '<label>Deniable</label><label class="chk"><input type="checkbox" ' + (h.same ? 'checked' : '') + ' data-act="toggleSame" ' + (h.second || h.text ? 'disabled' : '') + '> same with 1, 2 or no secrets</label></div></details>' +
+    '<details class="sec" data-sec="out" ' + secOpen('out', false) + '><summary>' + CHEV + ICON.download + 'Output<span class="tag">' + ({ keyed: 'ordinary name', suffix: 'cover + _1', custom: 'pattern' }[o.naming] || o.naming) + '</span></summary><div class="kv">' +
+    '<label>File name</label>' + optSelect('naming', [['keyed', 'Ordinary name'], ['suffix', 'Cover name + _1'], ['custom', 'Custom pattern']], o.naming) +
+    (o.naming === 'custom' ? '<label>Pattern</label><input class="in" data-opt="pattern" value="' + esc(o.pattern) + '">' : '') +
+    '<label>Save in</label><div class="pwrow"><input class="in" data-opt="outDir" value="' + esc(o.outDir) + '" placeholder="next to each cover"><button data-browse title="Choose a folder">' + ICON.folderPlus + '</button></div>' +
+    '<label>Overwrite</label><label class="chk"><input type="checkbox" data-opt="overwrite" ' + (o.overwrite ? 'checked' : '') + '> allow (never the inputs)</label></div></details>' +
+    (h.text ? '<details class="sec" data-sec="txt" ' + secOpen('txt', true) + '><summary>' + CHEV + ICON.text + 'Text cover</summary><div class="kv"><label>Style</label>' + optSelect('style', S.styles.map((s) => [s.id, s.id]), o.style) + (style.adjustable_order ? rng('order', 'Realism', 1, 6, o.order, o.order) : '') + '</div></details>' : '') +
+    '<div class="sec"><h4>Check</h4>' + (items.length ? '<div class="kv"><label>Capacity</label><div><div class="fillbar" style="height:7px"><i class="' + (totalNeed > totalCap ? 'bad' : '') + '" style="width:' + Math.max(3, Math.min(100, Math.round((totalNeed / Math.max(totalCap, 1)) * 100))) + '%"></i></div><div class="tiny">' + fmt(totalNeed) + ' of ' + fmt(totalCap) + '</div></div></div>' + (worst != null ? riskBlock(worst) : '<div class="tiny" style="margin-top:8px">' + (S.previewing ? 'Measuring on a copy...' : (items[0] && items[0].note) ? esc(items[0].note) : 'Risk is shown after hiding.') + '</div>') : '<div class="tiny">' + (S.previewing ? 'Measuring on a copy...' : 'Nothing to check yet.') + '</div>') +
+    '<div class="issues" style="margin-top:8px">' + (pr.map((x) => '<div class="p">' + ICON.warn + '<span>' + esc(x) + '</span></div>').join('') || (done ? '<div class="k">' + ICON.check + '<span>' + esc(doneText()) + '. New names are in the Risk column.</span></div>' : '<div class="k">' + ICON.check + '<span>' + esc(p.headline || 'Ready') + '</span></div>')) + '</div></div></div>' +
+    '<div class="runbox"><button class="btn big" id="run" data-run ' + (S.busy || pr.length ? 'disabled' : '') + '>' + (S.busy ? '<span class="spin"></span>' + esc(S.progress || 'Working...') : ICON.play + (p.kind === 'text' ? 'Make text' : p.kind === 'split' ? 'Split and hide' : p.kind === 'bulk' ? 'Hide all' : 'Hide')) + '</button></div>';
 }
 
-// ---------- dynamic panel parts ----------
-const RISK = { low: ['LOW', 'big'], medium: ['MEDIUM', 'big mid'], high: ['HIGH', 'big high'] };
-const gaugePos = (s) => (s < 5 ? 5 + s * 2 : s < 20 ? 40 + (s - 5) * 2 : Math.min(95, 70 + (s - 20) * 0.4));
-const barColor = (risk) => (risk === 'high' ? 'var(--red)' : risk === 'medium' ? '#f3d36b' : 'var(--green)');
-
-function reportHTML(title, r) {
-  const [name, cls] = RISK[r.risk];
-  return `<div class="meter"><div class="t"><span><b>${title}</b></span></div></div>
-    <div class="meter"><div class="t"><span>RS</span><span>${r.rs.toFixed(3)}</span></div><div class="bar"><i style="width:${Math.min(100, Math.max(0, r.rs * 100))}%;background:${barColor(r.risk)}"></i><u style="left:5%"></u></div></div>
-    <div class="meter"><div class="t"><span>SPA</span><span>${r.spa.toFixed(3)}</span></div><div class="bar"><i style="width:${Math.min(100, Math.max(0, r.spa * 100))}%;background:${barColor(r.risk)}"></i><u style="left:5%"></u></div></div>
-    <div class="${cls}"><b>${r.score.toFixed(0)} / 100</b> <small>${name} - classical detectors only</small></div>`;
+// ---------------------------------------------------------------- Reveal
+function revealZones() {
+  const r = S.reveal, by = {};
+  if (S.result && S.result.tab === 'reveal') S.result.items.forEach((x) => { (by[x.name] = by[x.name] || []).push(x); });
+  const setRows = S.result && S.result.tab === 'reveal' ? S.result.sets.map((x) => '<tr><td></td><td></td><td class="nm"><b>split ' + esc(x.set) + '</b></td><td class="dim">' + (x.output ? 'rebuilt' : 'short') + '</td><td><span class="rk ' + (x.output ? 'low' : 'mid') + '">' + (x.output ? 'split set' : 'needs ' + x.missing + ' more') + '</span></td><td class="mono ok">' + (x.output ? esc(baseName(x.output)) : '') + '</td><td></td></tr>').join('') : '';
+  const files = zoneShell('reveal', 'Reveal', r.files, listToolbar('reveal', 'addReveal', 'addRevealDir', 'pasteReveal', r.files),
+    r.files.length ? '<table><thead><tr><th></th><th>#</th><th>File</th><th>Size</th><th>Result</th><th>Saved as</th><th></th></tr></thead><tbody>' + sorted('reveal', r.files).map(({ f, i }) => {
+      const rs = by[f.name] || [], x = rs[0];
+      return '<tr ' + rowAttrs('reveal', i) + '><td class="grip">' + ICON.grip + '</td><td class="dim">' + (i + 1) + '</td><td class="nm" title="' + esc(f.path) + '">' + icFor(f) + ' ' + esc(f.name) + '</td><td class="dim">' + fmt(f.size) + '</td><td>' + (x ? '<span class="rk ' + (x.status === 'file' ? 'low' : x.status === 'share' ? 'mid' : '') + '">' + (x.status === 'file' ? (rs.length > 1 ? rs.length + ' found' : 'found') : x.status === 'share' ? 'share' : x.status === 'skipped' ? 'skipped' : 'nothing') + '</span>' : '') + '</td><td class="mono ok">' + rs.filter((y) => y.output).map((y) => esc(baseName(y.output))).join('<br>') + '</td><td class="act">' + rowOps('reveal', i) + '</td></tr>';
+    }).join('') + setRows + '</tbody></table>' : emptyBody('Drop the files or folders to open here.', 'addReveal', 'addRevealDir', 'pasteReveal'));
+  const pwz = zoneShell('passes', 'Passphrases', r.passes, '<button class="tbtn" data-showpass title="' + (showPass ? 'Hide' : 'Show') + ' the passphrases" aria-label="Show or hide">' + (showPass ? ICON.eyeOff : ICON.eye) + '</button><button class="tbtn" data-passpaste title="Paste a list of passphrases" aria-label="Paste list">' + ICON.paste + '</button>' + (r.passes.length ? '<button class="tbtn" data-act="clearPasses">' + ICON.trash + '</button>' : ''),
+    '<table><thead><tr><th>#</th><th>Passphrase</th><th></th></tr></thead><tbody>' + r.passes.map((p, i) => '<tr><td class="dim">' + (i + 1) + '</td><td class="mono"><span class="ic">' + ICON.key + '</span> ' + (showPass ? esc(p) : stars(p)) + '</td><td class="act">' + ib('close', 'removePass', i, 'Remove', 'del') + '</td></tr>').join('') + (!r.passes.length ? '<tr><td></td><td class="dim">Add every passphrase you might have used.</td><td></td></tr>' : '') + '</tbody></table><div style="padding:8px 10px"><div class="pwrow"><input class="in" id="draft" type="' + (showPass ? 'text' : 'password') + '" data-bind="reveal.draft" data-enter="addPass" value="' + esc(r.draft) + '" placeholder="type a passphrase and press Enter"><button data-act="addPass" title="Add">' + ICON.plus + '</button></div><div class="tiny" style="margin-top:6px">Every passphrase is tried on every file.</div></div>');
+  return [files, pwz];
+}
+function revealPanel() {
+  const o = S.opts, pr = problems(), r = S.reveal;
+  const hasText = r.files.some((f) => f.kind === 'text');
+  const style = S.styles.find((x) => x.id === o.style) || { adjustable_order: false };
+  return '<div class="pb">' +
+    '<div class="sec"><h4>' + ICON.sliders + 'Search</h4><div class="kv"><label>Sub-folders</label><label class="chk"><input type="checkbox" data-opt="recursive" ' + (o.recursive ? 'checked' : '') + '> included</label><label>Names only</label><label class="chk"><input type="checkbox" data-opt="namesOnly" ' + (o.namesOnly ? 'checked' : '') + '> only files with a tagged name</label></div></div>' +
+    '<div class="sec"><h4>' + ICON.download + 'Output</h4><div class="kv"><label>Save in</label><div class="pwrow"><input class="in" data-opt="outDir" value="' + esc(o.outDir) + '" placeholder="recovered/ next to the files"><button data-browse title="Choose a folder">' + ICON.folderPlus + '</button></div></div></div>' +
+    '<details class="sec" data-sec="rset" ' + secOpen('rset', false) + '><summary>' + CHEV + ICON.sliders + 'Settings<span class="tag">parity ' + o.parity + '</span></summary><div class="kv">' + rng('parity', 'Parity', 0, 64, o.parity, o.parity ? o.parity + ' B' : 'off', 2) + rng('rate', 'Slot size', 2, 30, o.rate, o.rate + '%') + '<label>KDF</label>' + optSelect('kdf', [['standard', 'Standard'], ['strong', 'Strong']], o.kdf) + '</div></details>' +
+    (hasText ? '<details class="sec" data-sec="rtxt" ' + secOpen('rtxt', true) + '><summary>' + CHEV + ICON.text + 'Text files<span class="tag">' + o.style + '</span></summary><div class="kv"><label>Style</label>' + optSelect('style', S.styles.map((s) => [s.id, s.id]), o.style) + (style.adjustable_order ? rng('order', 'Realism', 1, 6, o.order, o.order) : '') + '</div></details>' : '') +
+    '<div class="sec"><h4>Check</h4><div class="kv"><label>Work</label><div class="tiny">' + r.files.length + ' file(s) x ' + r.passes.length + ' passphrase(s) = ' + r.files.length * r.passes.length + ' tries</div></div><div class="issues" style="margin-top:8px">' + (pr.map((p) => '<div class="p">' + ICON.warn + '<span>' + esc(p) + '</span></div>').join('') || '<div class="k">' + ICON.check + '<span>Ready. A wrong passphrase looks like an empty file.</span></div>') + '</div></div></div>' +
+    '<div class="runbox"><button class="btn big" id="run" data-run ' + (S.busy || pr.length ? 'disabled' : '') + '>' + (S.busy ? '<span class="spin"></span>' + esc(S.progress || 'Working...') : ICON.play + 'Open') + '</button></div>';
 }
 
-function updateDynamic() {
-  const dyn = $('#dyn');
-  if (!dyn) return;
-  const p = S.preview;
-  let h = '';
-  ['pass', 'pass2'].forEach((id) => {
-    const m = $('#' + id + '-m'), w = $('#' + id + '-w'), v = S[id];
-    if (m) { const f = v.length < 8 ? 0.25 : v.length < 14 ? 0.6 : 1; m.style.width = (v ? f * 100 : 0) + '%'; m.style.background = f < 0.5 ? 'var(--red)' : 'var(--green)'; if (w) w.textContent = v ? (v.length < 8 ? 'weak' : v.length < 14 ? 'okay' : 'strong') : ''; }
+// ---------------------------------------------------------------- Analyze
+function analyzeZones() {
+  const a = S.analyze, res = S.result && S.result.tab === 'analyze' ? S.result.map : {};
+  const rows = sortBy.score ? a.files.map((f, i) => ({ f, i })).sort((x, y) => ((res[y.f.path] || { score: -1 }).score) - ((res[x.f.path] || { score: -1 }).score)) : sorted('analyze', a.files);
+  return [zoneShell('analyze', 'Images to scan', a.files, listToolbar('analyze', 'addAnalyze', 'addAnalyzeDir', 'pasteAnalyze', a.files) + '<button class="tbtn ' + (sortBy.score ? 'pri' : '') + '" data-sortscore title="Sort by score" aria-label="Sort by score">' + ICON.gauge + '</button>',
+    a.files.length ? '<table><thead><tr><th></th><th>#</th><th>Image</th><th>Size</th><th>Score</th><th style="width:34%">How easy to spot</th><th></th></tr></thead><tbody>' + rows.map(({ f, i }) => {
+      const r = res[f.path];
+      return '<tr ' + rowAttrs('analyze', i) + '><td class="grip">' + ICON.grip + '</td><td class="dim">' + (i + 1) + '</td><td class="nm" title="' + esc(f.path) + '">' + icFor(f) + ' ' + esc(f.name) + '</td><td class="dim">' + esc(f.summary || '') + '</td><td>' + (r && r.score != null ? '<span class="rk ' + r.cls + '">' + Math.round(r.score) + '</span>' : r && r.error ? '<span class="tiny" style="color:var(--red)" title="' + esc(r.error) + '">n/a</span>' : '') + '</td><td>' + (r && r.score != null ? gaugeBar(r.score) : r && r.error ? '<span class="tiny">' + esc(r.error.slice(0, 60)) + '</span>' : '') + '</td><td class="act">' + rowOps('analyze', i) + '</td></tr>';
+    }).join('') + '</tbody></table>' : emptyBody('Drop the images to scan here.', 'addAnalyze', 'addAnalyzeDir', 'pasteAnalyze')), ''];
+}
+function analyzePanel() {
+  const pr = problems();
+  return '<div class="pb"><div class="sec"><h4>' + ICON.sliders + 'Detectors</h4><div class="tiny" style="line-height:1.6">Chi-square, RS and SPA for images.<br>Calibrated histogram for JPEG.</div></div><div class="sec"><h4>Check</h4><div class="issues">' + (pr.map((p) => '<div class="p">' + ICON.warn + '<span>' + esc(p) + '</span></div>').join('') || '<div class="k">' + ICON.check + '<span>Ready. A low score is a good sign, not proof.</span></div>') + '</div></div></div><div class="runbox"><button class="btn big" id="run" data-run ' + (S.busy || pr.length ? 'disabled' : '') + '>' + (S.busy ? '<span class="spin"></span>' + esc(S.progress || 'Working...') : ICON.play + 'Scan') + '</button></div>';
+}
+function doneText() {
+  const r = S.result;
+  if (!r) return '';
+  if (r.tab === 'hide') { if (r.layout === 'text') return 'Cover text ready'; const n = r.items.filter((i) => i.output).length; return 'Saved ' + n + (n === 1 ? ' file' : ' files'); }
+  if (r.tab === 'reveal') { const n = r.items.filter((x) => x.status === 'file').length + r.sets.filter((x) => x.output).length; return n ? 'Recovered ' + n + (n === 1 ? ' item' : ' items') : 'Nothing found'; }
+  return 'Scanned ' + Object.keys(r.map).length + ' image(s)';
+}
+
+// ---------------------------------------------------------------- render
+function enhanceSelects(root) {
+  $$('select[data-opt]', root).forEach((s) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'dd';
+    const cur = s.options[s.selectedIndex];
+    wrap.innerHTML = '<button type="button"><span>' + esc(cur ? cur.textContent : '') + '</span>' + ICON.chevD + '</button><ul hidden>' + [...s.options].map((o) => '<li data-v="' + esc(o.value) + '" class="' + (o.selected ? 'on' : '') + '">' + esc(o.textContent) + ICON.check + '</li>').join('') + '</ul>';
+    s.style.display = 'none';
+    s.parentNode.insertBefore(wrap, s);
+    wrap.addEventListener('click', (e) => {
+      const li = e.target.closest('li');
+      if (li) { s.value = li.dataset.v; s.dispatchEvent(new Event('change', { bubbles: true })); return; }
+      if (e.target.closest('button')) {
+        const ul = $('ul', wrap), open = ul.hidden;
+        $$('.dd.open').forEach((d) => { d.classList.remove('open'); $('ul', d).hidden = true; });
+        ul.hidden = !open; wrap.classList.toggle('open', open);
+        if (open) { const r = ul.getBoundingClientRect(); ul.classList.toggle('up', r.bottom > innerHeight - 8 && wrap.getBoundingClientRect().top > r.height + 16); }
+      }
+    });
   });
-  const setT = (id, t) => { const e = $('#' + id); if (e) e.textContent = t; };
-  setT('parity-v', S.parity ? S.parity + ' bytes' : 'off');
-  setT('rate-v', S.rate + ' %');
-  setT('k-v', S.k + (S.files.carriers.length ? ' of ' + S.files.carriers.length : ''));
-  setT('order-v', S.order);
+}
+function fillRanges(root) { $$('input[type=range]', root).forEach((r) => { const min = +r.min || 0, max = +r.max || 100; r.style.setProperty('--p', (((+r.value - min) / (max - min || 1)) * 100) + '%'); }); }
 
-  if ((mode() === 'embed' || mode() === 'hidden') && p) {
-    const f = p.capacity ? Math.min(1, p.need / p.capacity) : 1;
-    const label = mode() === 'hidden' ? 'each slot holds' : 'capacity';
-    h += `<div class="slots"><i style="width:${Math.max(f * 100, 0)}%;background:${p.fits ? '#8fbf5f' : '#d2573f'}">${f > 0.18 ? fmt(p.need) : ''}</i><i style="flex:1;background:#ebe4c8;color:var(--dim)">${p.fits ? fmt(p.capacity - p.need) + ' free' : 'over by ' + fmt(p.need - p.capacity)}</i></div><div class="meter"><div class="t"><span>${label} (${esc(p.summary || '')})</span><b>${fmt(p.capacity)}</b></div></div>`;
-    h += '<h4>How hidden is it?</h4><div class="gaugew"><div class="gauge"><i id="gp" style="left:' + (p.measured ? gaugePos(p.measured.after.score) : 5) + '%"></i></div><div class="row2"><span>Hard to spot</span><span>Easy to spot</span></div></div>';
-    if (S.previewing && !p.measured) h += '<div class="help">measuring on a copy…</div>';
-    else if (p.measured) h += reportHTML('Measured on a copy (untouched image: ' + p.measured.before.score.toFixed(0) + ')', p.measured.after);
-    else if (p.detect_note) h += `<div class="help">${esc(p.detect_note)}</div>`;
-  } else if (mode() === 'split' && S.task === 'split' && p && p.split) {
-    h += `<div class="meter"><div class="t"><span>each share</span><b>${fmt(p.split.share_len)}</b></div></div>` + p.split.carriers.map((c, i) => `<div class="meter"><div class="t"><span>${esc(S.files.carriers[i] ? S.files.carriers[i].name : 'image ' + (i + 1))}</span><span class="${c.fits ? 'okline' : 'errline'}">holds ${fmt(c.capacity)} - ${c.fits ? 'fits' : 'too small'}</span></div></div>`).join('') + (S.files.carriers.length ? `<div class="help">Any ${Math.min(S.k, S.files.carriers.length)} of ${S.files.carriers.length} images rebuild the secret.</div>` : '');
-  } else if (mode() === 'bulk') {
-    const b = S.bulk;
-    if (b) {
-      const f = b.items.filter((i) => i.status === 'file').length, sh = b.items.filter((i) => i.status === 'share').length, n = b.items.filter((i) => i.status === 'nothing').length;
-      h += '<div class="meter"><div class="t"><span>files checked</span><b>' + b.checked + '</b></div></div><div class="meter"><div class="t"><span>files recovered</span><b>' + f + '</b></div></div><div class="meter"><div class="t"><span>shares found</span><b>' + sh + '</b></div></div><div class="meter"><div class="t"><span>nothing found</span><b>' + n + '</b></div></div>' + b.sets.map((x) => '<div class="meter"><div class="t"><span>split ' + esc(x.set) + '</span><span class="' + (x.output ? 'okline' : 'errline') + '">' + (x.output ? 'rebuilt' : x.missing + ' more share(s) needed') + '</span></div></div>').join('');
-    } else h += '<div class="help">Nothing has been run yet. Results appear in the middle.</div>';
-  } else if (mode() === 'analyze' && S.report) {
-    h += reportHTML('Image', S.report) + `<div class="help">chi-square p = ${S.report.chi_p.toFixed(2)} (unreliable on smooth histograms)</div>`;
-    if (S.reportB) h += reportHTML('Original', S.reportB) + `<div class="help"><b>change:</b> RS ${(S.report.rs - S.reportB.rs >= 0 ? '+' : '') + (S.report.rs - S.reportB.rs).toFixed(3)} &nbsp; SPA ${(S.report.spa - S.reportB.spa >= 0 ? '+' : '') + (S.report.spa - S.reportB.spa).toFixed(3)}</div>`;
-  } else if (mode() === 'reveal') {
-    h += '<div class="help">Tries the normal layout first, then the two-passphrase (Hidden) layout. A wrong passphrase looks exactly like an image with nothing hidden in it, by design. Use the same error correction and slot size as when hiding.</div>';
-  } else if (isTextMode()) {
-    const sty = S.styles.find((s) => s.id === S.style);
-    if (sty && mode() === 'text') h += `<div class="meter"><div class="t"><span>capacity</span><b>${(S.textEstimate ? S.textEstimate.bits_per_word : sty.bits_per_word).toFixed(2)} bits/word</b></div></div><div class="meter"><div class="t"><span>well-formed lines</span><b>${(S.textEstimate ? S.textEstimate.well_formed : sty.well_formed) != null ? (S.textEstimate ? S.textEstimate.well_formed : sty.well_formed) + '%' : 'n/a'}</b></div></div>`;
-    if (S.textEstimate && mode() === 'text') h += `<div class="meter"><div class="t"><span>this message becomes</span><b>~${S.textEstimate.words} words / ${S.textEstimate.lines} lines</b></div></div>`;
-    if (mode() === 'textreveal' && S.textRecovered != null) h += `<div class="help"><b>Recovered message</b></div><div class="outtext">${esc(S.textRecovered)}</div>`;
-  }
-  dyn.innerHTML = h;
-  const caph = $('#caph');
-  if (caph) caph.textContent = S.op === 'bulk' ? 'Summary' : S.op === 'split' ? 'Shares' : isTextMode() ? (mode() === 'textreveal' ? 'Recovered message' : 'Cover text') : S.op === 'analyze' ? 'Result' : 'Preview';
-
-  const probs = problems();
-  const run = $('#run'), m = $('#msg2');
-  if (run) {
-    run.textContent = S.busy ? 'Working…' : op().run();
-    run.disabled = S.busy || probs.length > 0;
-    run.classList.toggle('busy', S.busy);
-  }
-  if (m) { m.className = 'msg ' + (probs.length ? 'r' : 'g'); m.textContent = probs.length ? probs[0] : S.busy ? (S.step || 'Working') : 'Ready.'; }
-  renderCenterStat();
+function keepFocus(fn) {
+  const el = document.activeElement, id = el && el.id, a = el && el.selectionStart, b = el && el.selectionEnd;
+  fn();
+  if (id) { const n = document.getElementById(id); if (n) { n.focus(); try { n.setSelectionRange(a, b); } catch (x) { /* not a text box */ } } }
+}
+// Replace a block of the page only when its markup really changed, and keep its scroll positions.
+function patch(el, html) {
+  if (el.__h === html) return;
+  const scrolls = $$('.zb,.pb', el).map((x) => x.scrollTop);
+  el.innerHTML = html;
+  el.__h = html;
+  $$('.zb,.pb', el).forEach((x, i) => { x.scrollTop = scrolls[i] || 0; });
+  enhanceSelects(el); fillRanges(el);
+}
+function render() {
+  keepFocus(() => {
+    patch($('#tabs'), [['hide', 'Hide'], ['reveal', 'Reveal'], ['analyze', 'Analyze']].map(([k, l]) => '<button class="tab ' + (S.tab === k ? 'on' : '') + '" data-tab="' + k + '">' + l + '</button>').join(''));
+    const w = $('#work');
+    w.className = 'work' + (S.tab === 'analyze' ? ' one' : '');
+    if (!$('#z1')) w.innerHTML = '<div id="z1" class="dc"></div><div id="z2" class="dc"></div><div id="zp" class="dc"></div>';
+    const zones = S.tab === 'hide' ? hideZones() : S.tab === 'reveal' ? revealZones() : analyzeZones();
+    patch($('#z1'), zones[0]); patch($('#z2'), zones[1] || '');
+    patch($('#zp'), '<aside class="panel">' + (S.tab === 'hide' ? hidePanel() : S.tab === 'reveal' ? revealPanel() : analyzePanel()) + '</aside>');
+  });
 }
 
-// ---------- center and chrome ----------
-function renderChips() {
-  const c = file('carrier') || file('image');
-  $('#ctx').textContent = c ? c.name + (c.summary ? '  ' + c.summary : '') : '';
-  $('#chips').innerHTML = OPS.map((o) => `<span class="chip ${o.id === S.op ? 'on' : ''}" data-op="${o.id}">${o.label}</span>`).join(' ');
+// ---------------------------------------------------------------- jobs
+const waiters = new Map(), early = new Map();
+function onJob(ev) {
+  const w = waiters.get(ev.id);
+  if (!w) { (early.get(ev.id) || early.set(ev.id, []).get(ev.id)).push(ev); return; }
+  deliver(w, ev);
 }
-
-function renderCenterStat() {
-  const st = $('#stat');
-  if (!st) return;
-  const mm = mode();
-  if (mm === 'text') st.textContent = S.textOut ? S.textOut.split('\n').length + ' lines' : '';
-  else if (S.pix) st.textContent = S.real && (mm === 'embed' || mm === 'hidden') ? `changed ${(S.pix.changed * 100).toFixed(2)}% of samples (the saved file)` : mm === 'embed' || mm === 'hidden' || mm === 'split' ? `changed ${(S.pix.changed * 100).toFixed(2)}% of samples (preview)` : mm === 'analyze' && file('compare') ? `differs from the original in ${(S.pix.changed * 100).toFixed(2)}% of samples` : '';
-  else st.textContent = '';
+function deliver(w, ev) {
+  if (ev.event === 'step') { S.progress = ev.message; const b = $('#run'); if (b) b.innerHTML = '<span class="spin"></span>' + esc(ev.message); const bar = $('#prog').firstElementChild; bar.style.width = Math.min(90, parseFloat(bar.style.width || '6') + 14) + '%'; return; }
+  waiters.delete(w.id);
+  w.resolve(ev);
 }
-
-function bulkHTML() {
-  const b = S.bulk;
-  if (!b) return '<div class="empty-stage"><img src="icon.png" alt=""><div>Pick a folder on the left and enter your passphrases. Every file is tried with every passphrase, so you do not need to know which file holds what.</div></div>';
-  const note = { file: (i) => '<b>' + esc(i.detail) + '</b> &middot; ' + fmt(i.bytes), share: (i) => esc(i.detail), nothing: () => 'nothing found', skipped: (i) => 'skipped: ' + esc(i.detail) };
-  const rows = b.items.map((i) => '<tr class="' + i.status + '"><td class="nm">' + esc(i.name) + '</td><td>' + note[i.status](i) + '</td><td class="out">' + (i.output ? esc(baseName(i.output)) : '') + '</td></tr>').join('');
-  const sets = b.sets.map((x) => '<tr class="' + (x.output ? 'file' : 'share') + '"><td class="nm">split ' + esc(x.set) + '</td><td>' + (x.output ? '<b>rebuilt</b> from ' + x.found + ' of ' + x.n + ' shares &middot; ' + fmt(x.bytes) : 'found ' + x.found + ' of the ' + x.k + ' shares needed &mdash; ' + x.missing + ' more required') + '</td><td class="out">' + (x.output ? esc(baseName(x.output)) : '') + '</td></tr>').join('');
-  return '<div class="bulk"><table><thead><tr><th>File</th><th>Found</th><th>Saved as</th></tr></thead><tbody>' + rows + sets + '</tbody></table><div class="help">Saved in ' + esc(b.out_dir) + '. Files that show nothing either hold nothing or need a passphrase that is not in the list.</div></div>';
+async function jobAsync(spec) {
+  const id = await api.startJob(spec);
+  return new Promise((resolve) => {
+    const w = { id, resolve };
+    waiters.set(id, w);
+    for (const ev of early.get(id) || []) { if (!waiters.has(id)) break; deliver(w, ev); }
+    early.delete(id);
+  });
 }
-
-function renderCenter() {
-  const stage = $('#stage'), tools = $('#tools'), legend = $('#legend');
-  if (mode() === 'bulk') {
-    tools.innerHTML = '<b>Bulk recovery</b><span style="flex:1"></span><span id="stat">' + (S.bulk ? S.bulk.checked + ' files checked' : '') + '</span>';
-    stage.innerHTML = bulkHTML();
-    legend.innerHTML = '<span>A wrong passphrase looks the same as a file with nothing hidden, so a missing result can also mean a missing passphrase.</span>';
-    return;
-  }
-  if (isTextMode()) {
-    tools.innerHTML = '<b>Cover text</b><span style="flex:1"></span><span id="stat"></span>';
-    stage.innerHTML = '<div class="textview" id="tv"></div>';
-    $('#tv').textContent = S.textOut || (mode() === 'textreveal' ? 'Press Recover to read the hidden message from this text file. It will appear in the panel on the right.' : 'Type a message, then press Generate. The text is real output of the tool.');
-    legend.innerHTML = '<span>The text hides your message; keep the style and realism setting to read it back.</span>';
-    renderCenterStat();
-    return;
-  }
-  if (!S.pix) {
-    tools.innerHTML = '<span style="flex:1"></span><span id="stat"></span>';
-    stage.innerHTML = `<div class="empty-stage"><img src="icon.png" alt=""><div>${S.pixError ? esc(S.pixError) : 'Choose a cover image to see it here, and what hiding does to it.'}</div></div>`;
-    legend.innerHTML = '';
-    renderCenterStat();
-    return;
-  }
-  const viewOnly = S.op === 'analyze' || mode() === 'reveal';
-  const views = [['stego', viewOnly ? 'Image' : 'Stego'], ['orig', 'Original'], ['diff', 'Difference'], ['lsb', 'LSB plane']].filter(([k]) => !(viewOnly && k === 'orig'));
-  if (!views.some(([k]) => k === S.view)) S.view = 'stego';
-  tools.innerHTML = `<div class="seg" id="views">${views.map(([k, l]) => `<button class="${S.view === k ? 'on' : ''}" data-v="${k}">${l}</button>`).join('')}</div><span style="flex:1"></span><span id="stat"></span>`;
-  const hadCanvas = !!$('#cv');
-  stage.innerHTML = '<canvas id="cv"></canvas>';
-  if (hadCanvas) $('#cv').style.animation = 'none'; // pop in only when the picture first appears, not on every refresh
-  legend.innerHTML = '<span><i class="sw" style="background:#ee8a3f"></i>changed</span><span class="hover" id="hov">hover for pixel values</span>';
-  $('#views').onclick = (e) => { const b = e.target.closest('button'); if (b) { S.view = b.dataset.v; renderCenter(); } };
-  drawCanvas();
-  renderCenterStat();
-}
-
-function drawCanvas() {
-  const cv = $('#cv'), px = S.pix;
-  if (!cv || !px) return;
-  cv.width = px.w; cv.height = px.h;
-  const data = { stego: px.stego, orig: px.orig, diff: px.diff, lsb: px.lsb }[S.view] || px.stego;
-  cv.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(data), px.w, px.h), 0, 0);
-  cv.onmousemove = (e) => {
-    const r = cv.getBoundingClientRect(), x = Math.floor(((e.clientX - r.left) / r.width) * px.w), y = Math.floor(((e.clientY - r.top) / r.height) * px.h);
-    if (x < 0 || y < 0 || x >= px.w || y >= px.h) return;
-    const i = (y * px.w + x) * 4, d = (S.view === 'orig' ? px.orig : px.stego);
-    $('#hov').textContent = `x ${x} y ${y} - R ${d[i]} G ${d[i + 1]} B ${d[i + 2]} (LSB ${d[i] & 1}${d[i + 1] & 1}${d[i + 2] & 1})`;
-  };
-  cv.onmouseleave = () => { $('#hov').textContent = 'hover for pixel values'; };
-}
-
-// ---------- running jobs ----------
-function jobSpec() {
-  const f = (id) => file(id).path;
-  const m = mode();
-  if (m === 'embed') return { kind: 'embed', carrier: f('carrier'), payload: f('payload'), output: S.out || null, pass: S.pass, mode: S.mode, parity: S.parity };
-  if (m === 'hidden') return { kind: 'hidden', carrier: f('carrier'), public_file: f('payload'), public_pass: S.pass, hidden_file: S.second ? f('hidden') : null, hidden_pass: S.second ? S.pass2 : null, output: S.out || null, mode: S.mode, parity: S.parity, rate: S.rate / 100 };
-  if (m === 'reveal') return { kind: 'reveal', carrier: f('carrier'), pass: S.pass, output: S.out || null, parity: S.parity, rate: S.rate / 100 };
-  if (m === 'analyze') return { kind: 'analyze', image: f('image') };
-  if (m === 'bulk') return { kind: 'bulk', folder: S.dir, passes: passList(), out_dir: S.out || null, recursive: S.recursive, names_only: S.namesOnly };
-  if (m === 'split') return S.task === 'join' ? { kind: 'join', carriers: S.files.joinCarriers.map((x) => x.path), pass: S.pass, output: S.out || null, parity: S.parity } : { kind: 'split', secret: f('secret'), k: Math.min(S.k, S.files.carriers.length), pass: S.pass, carriers: S.files.carriers.map((x) => x.path), out_dir: S.out || null, mode: S.mode, parity: S.parity };
-  const sty = S.styles.find((x) => x.id === S.style) || {};
-  const order = sty.adjustable_order ? S.order : null;
-  if (m === 'textreveal') return { kind: 'text_reveal', text_file: f('carrier'), pass: S.pass, style: S.style, order, save: S.saveText || null };
-  return { kind: 'text_hide', message: S.message, pass: S.pass, style: S.style, order, save: S.saveText || null };
-}
-
 function setBusy(b) {
   S.busy = b;
-  const pr = $('#prog'), bar = pr.firstElementChild, st = $('#stage');
-  if (b) { bar.style.transition = 'none'; bar.style.width = '6%'; pr.classList.add('on'); void bar.offsetWidth; bar.style.transition = 'width .5s ease'; st.classList.add('scan'); }
-  else { bar.style.width = '100%'; st.classList.remove('scan'); setTimeout(() => pr.classList.remove('on'), 250); }
-  updateDynamic();
+  const pr = $('#prog'), bar = pr.firstElementChild;
+  if (b) { bar.style.transition = 'none'; bar.style.width = '6%'; pr.classList.add('on'); void bar.offsetWidth; bar.style.transition = 'width .5s ease'; }
+  else { bar.style.width = '100%'; setTimeout(() => pr.classList.remove('on'), 250); }
+  render();
 }
+const payloadDto = (f) => (f.typed ? { text: f.text } : { path: f.path });
+function wipe() { const h = S.hide; h.pass = ''; h.confirm = ''; h.confirm2 = ''; if (h.second) h.second.pass = ''; S.reveal.draft = ''; S.reveal.passes = []; }
 
 async function run() {
   if (S.busy || problems().length) return;
-  S.textOut = mode() === 'text' ? null : S.textOut;
-  S.textRecovered = null;
-  S.step = '';
+  const h = S.hide, o = S.opts;
+  S.progress = ''; S.result = null;
+  setBusy(true);
   try {
-    setBusy(true);
-    await api.startJob(jobSpec());
+    if (S.tab === 'hide') {
+      const p = plan();
+      if (p.kind === 'text') {
+        const st = S.styles.find((x) => x.id === o.style) || {};
+        const ev = await jobAsync({ kind: 'text_hide', message: h.message, pass: h.pass, style: o.style, order: st.adjustable_order ? o.order : null, save: null });
+        if (ev.event === 'error') throw ev.message;
+        S.result = { tab: 'hide', layout: 'text', text: ev.result.text, words: ev.result.words, items: [] };
+      } else {
+        const ev = await jobAsync({ kind: 'hide', layout: p.kind, payloads: h.payloads.map(payloadDto), covers: h.covers.map((c) => c.path), second: h.second && h.second.file ? payloadDto(h.second.file) : null, pass: h.pass, pass2: h.second ? h.second.pass : null, k: Math.min(h.k, h.covers.length), naming: { keyed: 'ordinary', suffix: 'suffix', custom: 'pattern' }[o.naming], pattern: o.pattern, out_dir: o.outDir || null, mode: o.mode, parity: o.parity, rate: o.rate / 100, kdf: o.kdf, overwrite: o.overwrite });
+        if (ev.event === 'error') throw ev.message;
+        S.result = { tab: 'hide', layout: ev.result.layout, items: ev.result.items };
+      }
+      const failed = S.result.items.filter((i) => i.error).length;
+      if (failed) toast(failed + ' file(s) failed. See the Saved as column.', { err: true, ms: 6000 }); else celebrate(doneText());
+    } else if (S.tab === 'reveal') {
+      const r = S.reveal;
+      if (r.draft) { r.passes.push(r.draft); r.draft = ''; }
+      const st = S.styles.find((x) => x.id === o.style) || {};
+      const ev = await jobAsync({ kind: 'bulk', inputs: r.files.map((f) => f.path), passes: r.passes, out_dir: o.outDir || null, recursive: false, names_only: o.namesOnly, text: r.files.some((f) => f.kind === 'text') ? { style: o.style, order: st.adjustable_order ? o.order : null } : null, parity: o.parity, rate: o.rate / 100, kdf: o.kdf });
+      if (ev.event === 'error') throw ev.message;
+      S.result = { tab: 'reveal', items: ev.result.items, sets: ev.result.sets, outDir: ev.result.out_dir };
+      celebrate(doneText());
+    } else {
+      const map = {};
+      let i = 0;
+      for (const f of S.analyze.files) {
+        S.progress = 'Scanning ' + (++i) + ' of ' + S.analyze.files.length + '...';
+        const b = $('#run'); if (b) b.innerHTML = '<span class="spin"></span>' + esc(S.progress);
+        const ev = await jobAsync({ kind: 'analyze', image: f.path });
+        if (ev.event === 'error') map[f.path] = { error: ev.message };
+        else map[f.path] = { score: ev.result.report.score, cls: riskOf(ev.result.report.score)[0] };
+        S.result = { tab: 'analyze', map };
+        render();
+      }
+      celebrate(doneText());
+    }
+    if (S.tab !== 'analyze') wipe();
   } catch (e) {
-    setBusy(false);
-    logLine(setErr(e), 'r');
+    toast(msgOf(e), { err: true, ms: 7000 });
   }
+  setBusy(false);
 }
 
-function wipePasswords() {
-  S.pass = ''; S.pass2 = ''; S.passList = '';
-  ['pass', 'pass2', 'passlist'].forEach((id) => { const e = $('#' + id); if (e) e.value = ''; });
-}
-
-function onJob(ev) {
-  if (ev.event === 'step') {
-    logLine(ev.message, 'd');
-    const bar = $('#prog').firstElementChild;
-    bar.style.width = Math.min(90, parseFloat(bar.style.width || '6') + 28) + '%';
-    return;
-  }
-  if (ev.event === 'error') { setBusy(false); logLine(ev.message, 'r'); return; }
-  const r = ev.result;
-  if (r.kind === 'embedded' || r.kind === 'hidden') {
-    S.real = { carrier: file('carrier').path, output: r.output };
-    logLine(`Saved ${r.output}` + (r.kind === 'embedded' ? ` (${r.bytes} bytes hidden)` : '') + (r.report ? ` - detectability ${r.report.score.toFixed(0)}/100 ${r.report.risk}` : ''), 'g');
-    wipePasswords(); setBusy(false); celebrate('Saved ' + baseName(r.output)); doViews(); openDir(S.dir);
-    return;
-  }
-  if (r.kind === 'bulk') {
-    S.bulk = r;
-    const got = r.items.filter((i) => i.status === 'file').length + r.sets.filter((x) => x.output).length;
-    logLine('Checked ' + r.checked + ' files: ' + got + ' recovered into ' + r.out_dir, 'g');
-    wipePasswords(); setBusy(false); celebrate(got ? 'Recovered ' + got + (got === 1 ? ' item' : ' items') : 'Nothing found'); renderCenter(); renderRight(); openDir(S.dir);
-    return;
-  }
-  if (r.kind === 'revealed') { logLine(`Recovered ${r.bytes} bytes (${r.layout === 'hidden' ? 'Hidden layout' : 'normal layout'}) into ${r.output}`, 'g'); wipePasswords(); setBusy(false); celebrate('Recovered ' + r.bytes + ' bytes'); openDir(S.dir); return; }
-  if (r.kind === 'split') { logLine(`Wrote ${r.outputs.length} images: ${r.outputs.map(baseName).join(', ')}`, 'g'); wipePasswords(); setBusy(false); celebrate('Split into ' + r.outputs.length + ' images'); openDir(S.dir); return; }
-  if (r.kind === 'joined') { logLine(`Recovered ${r.bytes} bytes from ${r.used} images into ${r.output}`, 'g'); wipePasswords(); setBusy(false); celebrate('Secret rebuilt'); openDir(S.dir); return; }
-  if (r.kind === 'analyzed') {
-    if (S.analyzing === 'b') { S.reportB = r.report; S.analyzing = null; logLine('Original scanned.', 'g'); setBusy(false); celebrate('Scan complete'); updateDynamic(); return; }
-    S.report = r.report; S.reportB = null;
-    logLine(`Scan finished: ${r.report.score.toFixed(0)}/100 ${r.report.risk}`, 'g');
-    if (file('compare')) { S.analyzing = 'b'; api.startJob({ kind: 'analyze', image: file('compare').path }).catch((e) => { S.analyzing = null; setBusy(false); logLine(setErr(e), 'r'); }); updateDynamic(); return; }
-    setBusy(false); celebrate('Scan complete'); updateDynamic();
-    return;
-  }
-  if (r.kind === 'text_hidden') { S.textOut = r.text; logLine(`Cover text ready: ${r.words} words` + (r.saved ? `, saved to ${r.saved}` : ''), 'g'); wipePasswords(); setBusy(false); celebrate('Cover text ready'); renderCenter(); if (r.saved) openDir(S.dir); return; }
-  if (r.kind === 'text_revealed') { S.textRecovered = r.text; logLine(`Recovered ${r.bytes} bytes` + (r.saved ? `, saved to ${r.saved}` : ''), 'g'); wipePasswords(); setBusy(false); celebrate('Message recovered'); updateDynamic(); if (r.saved) openDir(S.dir); return; }
-}
-
-// ---------- start-up ----------
-function setOp(id) {
-  S.op = id;
-  S.out = ''; S.saveText = ''; // these mean different things for each task (file, folder, text file)
-  S.active = slotDefs()[0] ? slotDefs()[0][0] : null;
-  S.preview = null; S.previewError = null; S.pix = null; S.pixError = null;
-  renderChips(); renderRight(); renderLeft(); renderCenter();
-  schedulePreview(); scheduleEstimate();
+// ---------------------------------------------------------------- actions
+async function act(name, arg) {
+  const h = S.hide, r = S.reveal, A = {
+    tab: () => { S.tab = arg; S.result = null; sel = { list: 'payloads', i: -1 }; focusZone = { hide: 'payloads', reveal: 'reveal', analyze: 'analyze' }[arg]; S.prev = null; if (arg === 'hide') schedulePreview(); render(); },
+    addPayload: () => pickInto('payloads', false), addPayloadDir: () => pickInto('payloads', true),
+    addCover: () => pickInto('covers', false), addCoverDir: () => pickInto('covers', true),
+    addReveal: () => pickInto('reveal', false), addRevealDir: () => pickInto('reveal', true),
+    addAnalyze: () => pickInto('analyze', false), addAnalyzeDir: () => pickInto('analyze', true),
+    pastePayload: () => pasteModal((l) => addPaths('payloads', l), { title: 'Paste paths' }), pasteCover: () => pasteModal((l) => addPaths('covers', l), { title: 'Paste paths' }),
+    pasteReveal: () => pasteModal((l) => addPaths('reveal', l), { title: 'Paste paths' }), pasteAnalyze: () => pasteModal((l) => addPaths('analyze', l), { title: 'Paste paths' }),
+    dropList: () => { const [k, i] = String(arg).split(':'); listOf(k).splice(+i, 1); S.result = null; sel.i = -1; changed(); },
+    move: () => { const [k, i, d] = String(arg).split(':'); const l = listOf(k), j = +i + +d; if (j >= 0 && j < l.length) { [l[+i], l[j]] = [l[j], l[+i]]; } S.result = null; changed(); },
+    clearList: () => { listOf(arg).length = 0; S.result = null; changed(); },
+    setLayout: () => { h.layout = arg; changed(); },
+    toggleSecond: () => { h.second = h.second ? null : { file: null, pass: '' }; if (h.second) h.same = false; h.confirm2 = ''; changed(); },
+    chooseSecond: () => chooseSecond(),
+    removeSecond: () => { h.second.file = null; changed(); },
+    toggleText: () => { h.text = !h.text; if (h.text) h.second = null; S.result = null; changed(); },
+    toggleSame: () => { h.same = !h.same; changed(); },
+    setOpt: () => { const [k, v] = String(arg).split('='); S.opts[k] = v; changed(); },
+    addPass: () => { if (r.draft && !r.passes.includes(r.draft)) { r.passes.push(r.draft); r.draft = ''; } render(); },
+    removePass: () => { r.passes.splice(+arg, 1); render(); },
+    clearPasses: () => { r.passes = []; render(); },
+  };
+  const fn = A[name];
+  if (fn) await fn();
 }
 
 document.addEventListener('click', (e) => {
-  const chip = e.target.closest('[data-op]');
-  if (chip) return setOp(chip.dataset.op);
+  const a = e.target.closest('[data-act]');
+  const tab = e.target.closest('[data-tab]');
+  if (tab) { act('tab', tab.dataset.tab); return; }
+  if (e.target.closest('.modalb')) return;
+  const zone = e.target.closest('[data-zone]'); if (zone && zone.dataset.zone !== 'second') focusZone = zone.dataset.zone;
+  if (a) { e.preventDefault(); act(a.dataset.act, a.dataset.arg); return; }
+  if (e.target.closest('[data-run]')) { run(); return; }
+  const row = e.target.closest('tr[data-row]'); if (row) { sel = { list: row.dataset.rk, i: +row.dataset.row }; render(); return; }
+  if (e.target.closest('[data-showpass]')) { showPass = !showPass; render(); return; }
+  const sz = e.target.closest('[data-sortz]'); if (sz) { const k = sz.dataset.sortz; sortBy[k] = !sortBy[k] ? 'name' : sortBy[k] === 'name' ? 'size' : ''; render(); return; }
+  if (e.target.closest('[data-sortscore]')) { sortBy.score = !sortBy.score; render(); return; }
+  if (e.target.closest('[data-passpaste]')) { pasteModal((lines) => { for (const l of lines) if (!S.reveal.passes.includes(l)) S.reveal.passes.push(l); render(); }, { title: 'Paste passphrases', secret: true, placeholder: 'a passphrase, then Enter', empty: 'No passphrases added yet.' }); return; }
+  if (e.target.closest('[data-typetext]')) { typing = !typing; render(); const t = $('#typed'); if (t) t.focus(); return; }
+  if (e.target.closest('[data-typecancel]')) { typing = false; typedDraft = ''; render(); return; }
+  if (e.target.closest('[data-typeadd]')) {
+    if (typedDraft.trim()) { const bytes = bytesOf(typedDraft); S.hide.payloads.push({ typed: true, text: typedDraft, name: 'Typed message ' + (++typedCount) + ' (' + bytes + ' B)', kind: 'text', size: bytes, path: 'typed:' + typedCount }); S.result = null; }
+    typing = false; typedDraft = ''; changed(); return;
+  }
+  if (e.target.closest('[data-browse]')) { api.pickFolders('Choose the folder to save in').then((p) => { if (p.length) { S.opts.outDir = p[0]; render(); } }); return; }
+  if (e.target.closest('[data-copytext]')) { copyText(S.result.text); return; }
+  if (e.target.closest('[data-savetext]')) { saveText(); return; }
+  if (!e.target.closest('.dd')) $$('.dd.open').forEach((d) => { d.classList.remove('open'); $('ul', d).hidden = true; });
+});
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); } catch (x) { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+  toast('Cover text copied');
+}
+async function saveText() {
+  try { const p = await api.saveDialog('cover.txt'); if (!p) return; await api.saveText(p, S.result.text); toast('Saved ' + baseName(p)); } catch (e) { toast(msgOf(e), { err: true }); }
+}
+document.addEventListener('input', (e) => {
+  const t = e.target;
+  if (t.id === 'typed') { typedDraft = t.value; const c = $('#typedcount'); if (c) c.textContent = typedInfo(); return; }
+  if (t.dataset && t.dataset.bind) {
+    const [a, b] = t.dataset.bind.split('.');
+    if (b === 'pass2') S.hide.second.pass = t.value; else if (b === 'confirm2') S.hide.confirm2 = t.value; else S[a][b] = t.type === 'range' ? +t.value : t.value;
+    if (t.dataset.bind === 'hide.k') changed(); else render();
+    return;
+  }
+  if (t.dataset && t.dataset.opt) {
+    S.opts[t.dataset.opt] = t.type === 'range' ? +t.value : t.type === 'checkbox' ? t.checked : t.value;
+    if (t.type === 'range') fillRanges();
+    changed();
+  }
+  if (t.type === 'range') fillRanges();
+}, true);
+document.addEventListener('change', (e) => { const t = e.target; if (t.dataset && t.dataset.opt && (t.tagName === 'SELECT' || t.type === 'checkbox')) { S.opts[t.dataset.opt] = t.type === 'checkbox' ? t.checked : t.value; changed(); } });
+document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.dataset && e.target.dataset.enter) { e.preventDefault(); act(e.target.dataset.enter); } });
+document.addEventListener('mouseover', (e) => {
+  const row = e.target.closest('tr[data-row]');
+  $$('.zb tr.hl').forEach((r) => r.classList.remove('hl'));
+  if (row && S.tab === 'hide') $$('tr[data-row="' + row.dataset.row + '"]').forEach((r) => r.classList.add('hl'));
 });
 
-document.addEventListener('keydown', (e) => {
-  if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); run(); }
-});
+// ---------------------------------------------------------------- files dropped from the desktop
+function setupDrop() {
+  try {
+    const wv = window.__TAURI__.webview.getCurrentWebview();
+    wv.onDragDropEvent((ev) => {
+      const p = ev.payload;
+      const at = p.position ? document.elementFromPoint(p.position.x / devicePixelRatio, p.position.y / devicePixelRatio) : null;
+      const z = at && at.closest ? at.closest('[data-zone]') : null;
+      $$('[data-zone].drag').forEach((x) => x.classList.remove('drag'));
+      if (p.type === 'over' || p.type === 'enter') { if (z) z.classList.add('drag'); return; }
+      if (p.type !== 'drop' || !z || !p.paths) return;
+      dropOn(z.dataset.zone, p.paths);
+    });
+  } catch (e) { /* not running inside the desktop shell */ }
+}
+async function dropOn(zone, paths) {
+  if (zone === 'second') { if (S.hide.second && paths[0]) { const en = await api.describe([paths[0]], 'any', false); if (en[0]) { S.hide.second.file = toItem(en[0]); changed(); } } return; }
+  if (LISTS[zone]) addPaths(zone, paths);
+}
 
-
+// ---------------------------------------------------------------- start-up
 function setupWindowControls() {
   let w = null;
   try { w = window.__TAURI__.window.getCurrentWindow(); } catch (e) { /* not running inside the desktop shell */ }
   const bind = (id, fn) => { const b = $('#' + id); if (b) b.onclick = () => { try { fn(); } catch (e) { /* ignore */ } }; };
-  const maxIcon = '<svg viewBox="0 0 10 10" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg>';
-  const restoreIcon = '<svg viewBox="0 0 10 10" aria-hidden="true"><rect x="1" y="2.5" width="6.5" height="6.5" rx="1"/><path d="M3 2.5V1.8A.8.8 0 0 1 3.8 1H8.2A.8.8 0 0 1 9 1.8V6.2a.8.8 0 0 1-.8.8H7.5"/></svg>';
-  const sync = async () => {
-    if (!w) return;
-    try { const m = await w.isMaximized(); const b = $('#wmax'); b.innerHTML = m ? restoreIcon : maxIcon; $('#app').classList.toggle('max', m); b.title = m ? 'Restore' : 'Maximize'; } catch (e) { /* ignore */ }
-  };
-  bind('wmin', () => w.minimize());
-  bind('wmax', () => w.toggleMaximize());
-  bind('wclose', () => w.close());
-  if (w) { w.onResized(sync); sync(); }
+  bind('wmin', () => w.minimize()); bind('wclose', () => w.close());
 }
-
 async function init() {
   setupWindowControls();
   const d = await api.defaults();
-  S.parity = d.parity; S.rate = Math.round(d.rate * 100); S.styles = d.styles;
-  const sty = S.styles.find((s) => s.id === S.style);
-  if (sty) S.order = sty.default_order;
-  try { S.roots = await api.roots(); } catch (e) { S.roots = []; }
+  S.opts.parity = d.parity; S.opts.rate = Math.round(d.rate * 100); S.styles = d.styles;
+  const st = S.styles.find((s) => s.id === S.opts.style) || S.styles[0];
+  if (st) { S.opts.style = st.id; S.opts.order = st.default_order; }
   await api.onJob(onJob);
-  renderChips(); renderRight(); renderCenter();
-  // The entrance animation is for the first paint only; later re-renders must not replay it.
+  setupDrop();
+  render();
   setTimeout(() => $('#app').classList.add('ready'), 1200);
-  let start = null;
-  try { start = localStorage.getItem('stegosaur.dir'); } catch (e) { start = null; }
-  if (!(start && (await openDir(start)))) { if (!(await openDir(d.home || d.cwd))) await openDir(d.cwd); }
 }
-
-window.StegoUI = { S, setOp, openDir, pick, run, problems, doPreview, doViews, onJob };
-init().catch((e) => { document.body.insertAdjacentHTML('afterbegin', `<pre style="color:#b00;padding:12px">Start-up failed: ${esc(setErr(e))}</pre>`); });
+window.StegoUI = { S, act, setSecond: async (p) => { const en = await api.describe([p], 'any', false); S.hide.second.file = toItem(en[0]); changed(); }, render, run, plan, problems, addPaths, dropOn, doPreview, schedulePreview, wipe, riskOf, setTyped: (t) => { S.hide.payloads.push({ typed: true, text: t, name: 'Typed message ' + (++typedCount) + ' (' + bytesOf(t) + ' B)', kind: 'text', size: bytesOf(t), path: 'typed:' + typedCount }); changed(); } };
+init().catch((e) => { document.body.insertAdjacentHTML('afterbegin', '<pre style="color:#b00;padding:12px">Start-up failed: ' + esc(msgOf(e)) + '</pre>'); });

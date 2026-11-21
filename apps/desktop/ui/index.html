@@ -4,19 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Stegosaur</title>
+<link rel="stylesheet" href="fonts.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="app" id="app">
-  <div class="top" data-tauri-drag-region><img id="logo" src="icon.png" alt="" data-tauri-drag-region><b data-tauri-drag-region>Stegosaur</b><span id="chips"></span><span class="sp" data-tauri-drag-region></span><span id="ctx" data-tauri-drag-region></span><div class="wc"><button id="wmin" title="Minimize" aria-label="Minimize"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1 5h8"/></svg></button><button id="wmax" title="Maximize" aria-label="Maximize"><svg viewBox="0 0 10 10" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg></button><button id="wclose" class="close" title="Close" aria-label="Close"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"/></svg></button></div></div>
-  <aside class="left" id="left"></aside>
-  <section class="center">
-    <div class="prog" id="prog"><i></i></div>
-    <div class="tools" id="tools"></div>
-    <div class="stage" id="stage"></div>
-    <div class="legend" id="legend"></div>
-  </section>
-  <aside class="right" id="right"></aside>
+  <div class="prog" id="prog"><i></i></div>
+  <div class="top" data-tauri-drag-region><img id="logo" src="icon.png" alt="" data-tauri-drag-region><b class="name" data-tauri-drag-region>Stegosaur</b><div class="tabs" id="tabs"></div><span class="sp" data-tauri-drag-region></span><div class="wc"><button id="wmin" title="Minimize" aria-label="Minimize"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1 5h8"/></svg></button><button id="wclose" class="close" title="Close" aria-label="Close"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"/></svg></button></div></div>
+  <div class="work" id="work"></div>
 </div>
 <div class="toast" id="toast"></div>
 <script src="api.js"></script>
