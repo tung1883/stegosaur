@@ -183,7 +183,7 @@ fn build_forms() -> Vec<Form> {
             step(Id::Slot, "Slot size", 10, 2, 30, 2, "%"),
             mode(),
             parity(),
-            text(Id::Output, "Save as", "auto: camera-style name", false),
+            text(Id::Output, "Save as", "auto: natural name (private tag)", false),
             text(Id::TextOutput, "Save to file (optional)", "", false),
             button("Hide it"),
         ]),
@@ -799,6 +799,7 @@ impl App {
             JobResult::Split { outputs } => ok(format!("Wrote {} images: {}", outputs.len(), outputs.iter().map(|p| p.file_name().and_then(|n| n.to_str()).unwrap_or("?").to_string()).collect::<Vec<_>>().join(", "))),
             JobResult::Revealed { output, bytes, layout } => ok(format!("Recovered {bytes} bytes ({}) into {}", if layout == RevealLayout::Hidden { "Hidden layout" } else { "normal layout" }, output.display())),
             JobResult::Joined { output, bytes, used } => ok(format!("Recovered {bytes} bytes from {used} images into {}", output.display())),
+            JobResult::Hide(done) => ok(format!("Saved {} file(s)", done.items.iter().filter(|i| i.output.is_some()).count())),
             JobResult::Bulk { report, checked } => ok(format!("Checked {checked} files: {} item(s) recovered into {}", report.recovered_files(), report.out_dir.display())),
             JobResult::Analyzed { report } => {
                 self.analysis[if tag == Tag::AnalyzeB { 1 } else { 0 }] = Some(report);

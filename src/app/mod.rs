@@ -5,6 +5,7 @@ pub mod bulk;
 pub mod config;
 pub mod files;
 pub mod friendly;
+pub mod hide;
 pub mod jobs;
 pub mod preview;
 pub mod secret;

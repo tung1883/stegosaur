@@ -12,7 +12,7 @@ fn app_cfg() -> AppConfig {
 }
 
 fn opts(dir: &std::path::Path, passes: &[&str], names_only: bool) -> BulkOptions {
-    BulkOptions { passes: passes.iter().map(|p| Secret::new(p)).collect(), out_dir: dir.join("recovered"), cfg: app_cfg(), names_only }
+    BulkOptions { passes: passes.iter().map(|p| Secret::new(p)).collect(), out_dir: dir.join("recovered"), cfg: app_cfg(), names_only, text: None }
 }
 
 fn bytes(n: usize, seed: u8) -> Vec<u8> {

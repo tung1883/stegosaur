@@ -62,7 +62,7 @@ struct Common {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Pick a camera-style file name that carries a tag only your passphrase can recognise
+    /// Pick a natural file name (camera style for images, recorder style for audio) that carries a tag only your passphrase can recognise
     TagName {
         /// Folder the new file will live in
         #[arg(long, default_value = ".")]
@@ -295,7 +295,7 @@ fn run(cli: Cli) -> Result<()> {
             }
             let out_dir = out.unwrap_or_else(|| folder.join("recovered"));
             let files = list_files(&folder, recursive, Some(&out_dir))?;
-            let opts = BulkOptions { passes, out_dir: out_dir.clone(), cfg: stegosaur::app::AppConfig::default(), names_only };
+            let opts = BulkOptions { passes, out_dir: out_dir.clone(), cfg: stegosaur::app::AppConfig::default(), names_only, text: None };
             let total = files.len();
             let report = bulk_run(&files, &opts, &mut |done, _, name| eprintln!("[{done}/{total}] {name}"))?;
             println!();

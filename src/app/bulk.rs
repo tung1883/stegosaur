@@ -25,6 +25,8 @@ pub struct BulkOptions {
     pub cfg: AppConfig,
     /// Only try a passphrase on files whose name carries its tag (fast, relies on the naming).
     pub names_only: bool,
+    /// Also read `.txt` and `.log` files as cover text in this style (and realism order).
+    pub text: Option<(crate::corpora::Style, Option<usize>)>,
 }
 
 /// What one passphrase opened in one file.
@@ -96,6 +98,10 @@ fn is_carrier(p: &Path) -> bool {
     ext_of(p).is_some_and(|e| is_image_ext(&e) || is_audio_ext(&e) || is_jpeg_ext(&e))
 }
 
+fn is_text(p: &Path) -> bool {
+    ext_of(p).is_some_and(|e| e == "txt" || e == "log")
+}
+
 /// Writes `data` to a new file next to `stem` in `dir`, never overwriting.
 fn write_new(dir: &Path, stem: &str, data: &[u8]) -> Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
@@ -122,8 +128,30 @@ struct FileResult {
 fn look_at(file: &Path, opts: &BulkOptions) -> FileResult {
     let mut entry = BulkEntry { file: file.to_path_buf(), found: Vec::new(), skipped: None };
     let mut shares = Vec::new();
+    if let (true, Some((style, order))) = (is_text(file), opts.text) {
+        // Cover text: try every passphrase with the chosen style.
+        let stem = file.file_stem().and_then(|n| n.to_str()).unwrap_or("text");
+        match std::fs::read_to_string(file) {
+            Ok(text) => {
+                let kdf = opts.cfg.to_config().kdf;
+                let mut n = 0usize;
+                for (pi, pass) in opts.passes.iter().enumerate() {
+                    if pass.is_empty() {
+                        continue;
+                    }
+                    if let Ok(data) = crate::app::text::reveal(style, order, pass, &text, kdf) {
+                        if let Ok(path) = write_new(&opts.out_dir, &numbered(stem, &mut n), &data) {
+                            entry.found.push(Found::File { layout: "cover text", path, bytes: data.len(), pass_index: pi });
+                        }
+                    }
+                }
+            }
+            Err(e) => entry.skipped = Some(crate::app::friendly::message(&e.into())),
+        }
+        return FileResult { entry, shares };
+    }
     if !is_carrier(file) {
-        entry.skipped = Some("not an image or audio file".into());
+        entry.skipped = Some(if is_text(file) { "text file: choose its style under Advanced to read it".into() } else { "not an image or audio file".into() });
         return FileResult { entry, shares };
     }
     let carrier = match AnyCarrier::load(file) {

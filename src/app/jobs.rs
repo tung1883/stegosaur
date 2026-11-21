@@ -25,7 +25,9 @@ pub enum JobSpec {
     Reveal { carrier: PathBuf, pass: Secret, output: PathBuf, cfg: AppConfig, overwrite: bool },
     Join { carriers: Vec<PathBuf>, pass: Secret, output: PathBuf, cfg: AppConfig, overwrite: bool },
     /// Look at every file in a folder with every passphrase and recover what opens.
-    Bulk { folder: PathBuf, recursive: bool, passes: Vec<Secret>, out_dir: PathBuf, names_only: bool, cfg: AppConfig },
+    Bulk { inputs: Vec<PathBuf>, recursive: bool, passes: Vec<Secret>, out_dir: PathBuf, names_only: bool, cfg: AppConfig, text: Option<(Style, Option<usize>)> },
+    /// The unified Hide job: every layout, typed or file secrets, naming schemes.
+    Hide(crate::app::hide::HideSpec),
     Analyze { image: PathBuf },
     /// Spell a message out as cover text; `save` writes the text to a file as well.
     TextHide { message: Vec<u8>, pass: Secret, style: Style, order: Option<usize>, cfg: AppConfig, save: Option<PathBuf>, overwrite: bool },
@@ -48,6 +50,7 @@ pub enum JobResult {
     Joined { output: PathBuf, bytes: usize, used: usize },
     Analyzed { report: Report },
     Bulk { report: crate::app::bulk::BulkReport, checked: usize },
+    Hide(crate::app::hide::HideDone),
     TextHidden { text: String, words: usize, saved: Option<PathBuf> },
     TextRevealed { bytes: Vec<u8>, saved: Option<PathBuf> },
 }
@@ -67,7 +70,7 @@ pub fn default_output(carrier: &Path) -> PathBuf {
     carrier.with_file_name(format!("{stem}_1.{ext}"))
 }
 
-/// Output path for a new stego file: a camera-style name carrying a keyed tag (see [`crate::tag`]),
+/// Output path for a new stego file: a natural-looking name (camera or recorder style) carrying a keyed tag (see [`crate::tag`]),
 /// or the plain `_1` name when there is no passphrase to key it with.
 pub fn auto_output(carrier: &Path, pass: &Secret, kind: crate::tag::Kind, cfg: &AppConfig) -> PathBuf {
     if pass.is_empty() {
@@ -90,7 +93,7 @@ fn canon_target(p: &Path) -> PathBuf {
     }
 }
 
-fn check_output(output: &Path, inputs: &[&Path], overwrite: bool) -> Result<()> {
+pub(crate) fn check_output(output: &Path, inputs: &[&Path], overwrite: bool) -> Result<()> {
     let target = canon_target(output);
     if inputs.iter().any(|i| canon(i) == target) {
         return Err(Error::Invalid("the output would overwrite an input file".into()));
@@ -106,7 +109,7 @@ fn check_output(output: &Path, inputs: &[&Path], overwrite: bool) -> Result<()> 
     Ok(())
 }
 
-fn check_ext(output: &Path, c: &AnyCarrier) -> Result<()> {
+pub(crate) fn check_ext(output: &Path, c: &AnyCarrier) -> Result<()> {
     let ext = output.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).unwrap_or_default();
     let ok = match c {
         AnyCarrier::Image(_) => crate::carrier::is_image_ext(&ext),
@@ -120,14 +123,14 @@ fn check_ext(output: &Path, c: &AnyCarrier) -> Result<()> {
     }
 }
 
-fn report_of(c: &AnyCarrier) -> Option<Report> {
+pub(crate) fn report_of(c: &AnyCarrier) -> Option<Report> {
     match c {
         AnyCarrier::Image(img) => Some(analyze(img)),
         AnyCarrier::Wav(_) | AnyCarrier::Jpeg(_) => None,
     }
 }
 
-fn require_pass(s: &Secret) -> Result<()> {
+pub(crate) fn require_pass(s: &Secret) -> Result<()> {
     if s.is_empty() {
         Err(Error::Invalid("the passphrase must not be empty".into()))
     } else {
@@ -247,16 +250,26 @@ pub fn run(spec: JobSpec, emit: &mut dyn FnMut(JobEvent)) -> Result<JobResult> {
             std::fs::write(&output, &data)?;
             Ok(JobResult::Joined { output, bytes: data.len(), used: loaded.len() })
         }
-        JobSpec::Bulk { folder, recursive, passes, out_dir, names_only, cfg } => {
-            if !folder.is_dir() {
-                return Err(Error::Invalid("choose a folder to look through".into()));
-            }
+        JobSpec::Hide(spec) => {
+            let done = crate::app::hide::run_hide(spec, &mut |m| step(m))?;
+            Ok(JobResult::Hide(done))
+        }
+        JobSpec::Bulk { inputs, recursive, passes, out_dir, names_only, cfg, text } => {
             step("Listing the files");
-            let files = crate::app::bulk::list_files(&folder, recursive, Some(&out_dir))?;
-            if files.is_empty() {
-                return Err(Error::Invalid("there are no files in that folder".into()));
+            let mut files: Vec<PathBuf> = Vec::new();
+            for p in &inputs {
+                if p.is_dir() {
+                    files.extend(crate::app::bulk::list_files(p, recursive, Some(&out_dir))?);
+                } else if p.is_file() {
+                    files.push(p.clone());
+                }
             }
-            let opts = crate::app::bulk::BulkOptions { passes, out_dir, cfg, names_only };
+            files.sort();
+            files.dedup();
+            if files.is_empty() {
+                return Err(Error::Invalid("there are no files to look through".into()));
+            }
+            let opts = crate::app::bulk::BulkOptions { passes, out_dir, cfg, names_only, text };
             let total = files.len();
             let report = crate::app::bulk::run(&files, &opts, &mut |done, total, name| step(&format!("Checked {done} of {total}: {name}")))?;
             Ok(JobResult::Bulk { report, checked: total })
@@ -301,7 +314,9 @@ pub fn run(spec: JobSpec, emit: &mut dyn FnMut(JobEvent)) -> Result<JobResult> {
             step("Running the detectors");
             match c {
                 AnyCarrier::Image(img) => Ok(JobResult::Analyzed { report: analyze(&img) }),
-                AnyCarrier::Jpeg(_) => Err(Error::Unsupported("analysis does not apply to JPEG: its hidden data lives in the compressed coefficients, which the pixel detectors cannot see".into())),
+                AnyCarrier::Jpeg(j) => crate::analysis::analyze_jpeg(&j)
+                    .map(|report| JobResult::Analyzed { report })
+                    .ok_or_else(|| Error::Unsupported("this JPEG is too small for the coefficient detector".into())),
                 AnyCarrier::Wav(_) => Err(Error::Unsupported("analysis is only available for images".into())),
             }
         }

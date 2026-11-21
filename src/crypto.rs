@@ -22,6 +22,11 @@ impl Default for KdfParams {
 }
 
 impl KdfParams {
+    /// Slower key derivation (about four times the work of the default) for people who want more guess protection.
+    pub fn strong() -> Self {
+        Self { log_n: 17, r: 8, p: 1 }
+    }
+
     /// Cheap parameters for tests and benchmarks only.
     pub fn fast() -> Self {
         Self { log_n: 6, r: 8, p: 1 }
