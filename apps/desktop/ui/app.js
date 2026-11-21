@@ -276,7 +276,7 @@ function zoneShell(key, title, files, toolbar, body, cntText) {
 }
 const emptyBody = (msg, add, dir, paste, extra) => '<div class="dropmsg"><div class="big">' + ICON.download + '</div><div>' + msg + '</div><div class="row2"><button class="tbtn pri" data-act="' + add + '" title="Add files" aria-label="Add files">' + ICON.filePlus + '</button><button class="tbtn" data-act="' + dir + '" title="Add a folder" aria-label="Add a folder">' + ICON.folderPlus + '</button><button class="tbtn" data-act="' + paste + '" title="Paste paths" aria-label="Paste paths">' + ICON.paste + '</button>' + (extra || '') + '</div></div>';
 const typeBtn = () => '<button class="tbtn ' + (typing ? 'pri' : '') + '" data-typetext title="Type a short message to hide, no file needed" aria-label="Type text">' + ICON.text + '</button>';
-const listToolbar = (key, add, dir, paste, files, extra) => tb('filePlus', 'Add', add, 'Add files') + tb('folderPlus', 'Folder', dir, 'Add a whole folder') + tb('paste', 'Paste', paste, 'Paste a list of paths') + (extra || '') + (files.length > 1 ? '<button class="tbtn ' + (sortBy[key] ? 'pri' : '') + '" data-sortz="' + key + '" title="Sort: ' + (sortBy[key] || 'as added') + ' (click to change)" aria-label="Sort">' + ICON.sort + '</button>' : '') + (files.length ? '<button class="tbtn" data-act="clearList" data-arg="' + key + '" title="Remove all">' + ICON.trash + '</button>' : '');
+const listToolbar = (key, add, dir, paste, files, extra) => tb('filePlus', 'Add', add, 'Add files') + tb('folderPlus', 'Folder', dir, 'Add a whole folder') + tb('paste', 'Paste', paste, 'Paste a list of paths') + (extra || '') + (files.length ? '<button class="tbtn" data-act="clearList" data-arg="' + key + '" title="Remove all">' + ICON.trash + '</button>' : '');
 const rowOps = (key, i) => ib('arrowUp', 'move', key + ':' + i + ':-1', 'Move up') + ib('arrowDown', 'move', key + ':' + i + ':1', 'Move down') + ib('close', 'dropList', key + ':' + i, 'Remove', 'del');
 const rowAttrs = (key, i) => 'data-row="' + i + '" data-rk="' + key + '" class="' + (sel.list === key && sel.i === i ? 'sel' : '') + '"';
 function nameHTML(name) {
@@ -287,9 +287,22 @@ function nameHTML(name) {
 }
 const nameCell = (f) => '<span class="nmw">' + icFor(f) + '<span class="nt">' + nameHTML(f.name) + '</span></span>';
 const icFor = (f) => '<span class="ic k-' + f.kind + '">' + (ICON[f.kind] || ICON.other) + '</span>';
-function sorted(key, files) {
+// A clickable column header. The first click sorts ascending, the next one on the same column reverses it.
+const sh = (key, col, label, cls) => {
+  const s = sortBy[key], on = s && (s.col === col || (col === 'score' && s.col === 'gauge'));
+  return '<th class="sortable ' + (cls || '') + (on ? (s.dir > 0 ? ' asc' : ' desc') : '') + '" data-sortcol="' + key + ':' + col + '" title="Sort by ' + esc(String(label || 'order added').toLowerCase()) + '">' + label + '</th>';
+};
+// `get` supplies the values of columns that are not name, size or position.
+function sorted(key, files, get) {
   const arr = files.map((f, i) => ({ f, i })), s = sortBy[key];
-  if (s) arr.sort((a, b) => (s === 'name' ? a.f.name.localeCompare(b.f.name) : b.f.size - a.f.size));
+  if (!s) return arr;
+  const col = s.col === 'gauge' ? 'score' : s.col;
+  const val = (x) => (col === 'idx' ? x.i : col === 'name' ? x.f.name.toLowerCase() : col === 'size' ? x.f.size : get && get[col] ? get[col](x.f, x.i) : x.i);
+  arr.sort((a, b) => {
+    const va = val(a), vb = val(b);
+    const c = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb), undefined, { numeric: true });
+    return (c || a.i - b.i) * s.dir;
+  });
   return arr;
 }
 const typedEditor = () => (typing ? '<div class="typed"><label class="l">Message to hide</label><textarea class="in" id="typed" placeholder="Type or paste the text to hide" style="height:96px">' + esc(typedDraft) + '</textarea><div class="tiny" id="typedcount" style="margin-top:4px">' + typedInfo() + '</div><div class="row2"><button class="tbtn pri" data-typeadd title="Add the message" aria-label="Add message">' + ICON.check + '</button><button class="tbtn" data-typecancel title="Cancel" aria-label="Cancel">' + ICON.close + '</button></div></div>' : '');
@@ -303,13 +316,13 @@ function hideZones() {
   const left = h.text
     ? zoneShell('payloads', 'Hide', [], '', '<div style="padding:10px"><label class="l">Message to hide</label><textarea class="in" id="msg" data-bind="hide.message" style="height:150px" placeholder="Type the message to hide">' + esc(h.message) + '</textarea><div class="tiny" style="margin-top:4px">' + bytesOf(h.message) + ' bytes</div></div>', bytesOf(h.message) + ' bytes')
     : zoneShell('payloads', 'Hide', h.payloads, listToolbar('payloads', 'addPayload', 'addPayloadDir', 'pastePayload', h.payloads, typeBtn()),
-      typedEditor() + (h.payloads.length ? '<table><thead><tr><th class="c-idx">#</th><th>File</th><th class="c-size">Size</th><th class="c-act"></th></tr></thead><tbody>' + sorted('payloads', h.payloads).map(({ f, i }) => '<tr ' + rowAttrs('payloads', i) + '><td class="dim">' + (i + 1) + '</td><td class="nm" title="' + esc(f.path) + '">' + nameCell(f) + '</td><td class="dim">' + fmt(f.size) + '</td><td class="act">' + rowOps('payloads', i) + '</td></tr>').join('') + '</tbody></table>' : (typing ? '' : emptyBody('Drop the stuff to hide here', 'addPayload', 'addPayloadDir', 'pastePayload', typeBtn()))));
+      typedEditor() + (h.payloads.length ? '<table><thead><tr>' + sh('payloads', 'idx', '#', 'c-idx') + sh('payloads', 'name', 'File') + sh('payloads', 'size', 'Size', 'c-size') + '<th class="c-act"></th></tr></thead><tbody>' + sorted('payloads', h.payloads).map(({ f, i }) => '<tr ' + rowAttrs('payloads', i) + '><td class="dim">' + (i + 1) + '</td><td class="nm" title="' + esc(f.path) + '">' + nameCell(f) + '</td><td class="dim">' + fmt(f.size) + '</td><td class="act">' + rowOps('payloads', i) + '</td></tr>').join('') + '</tbody></table>' : (typing ? '' : emptyBody('Drop the stuff to hide here', 'addPayload', 'addPayloadDir', 'pastePayload', typeBtn()))));
   const gen = S.result && S.result.tab === 'hide' && S.result.text != null ? S.result.text : null;
   let right;
   if (h.text && gen != null) right = zoneShell('covers', 'Cover text', [], '<button class="tbtn" data-copytext title="Copy the text" aria-label="Copy">' + ICON.copy + '</button><button class="tbtn pri" data-savetext title="Save as a .txt file" aria-label="Save">' + ICON.download + '</button>', '<div class="textout">' + esc(gen) + '</div>', gen.split('\n').length + ' lines, ' + gen.split(/\s+/).filter(Boolean).length + ' words');
   else if (h.text) right = zoneShell('covers', 'Cover', [], '', '<div class="dropmsg"><div class="big">' + ICON.text + '</div><div>Generated text is the cover.<br>Style and realism are in the panel.</div></div>');
   else right = zoneShell('covers', 'Cover(s)', h.covers, listToolbar('covers', 'addCover', 'addCoverDir', 'pasteCover', h.covers),
-    h.covers.length ? '<table><thead><tr><th class="c-idx">#</th><th>Cover</th>' + (res ? '<th class="c-res2">Saved as</th>' : '<th class="c-fill">Room</th>') + '<th class="c-act"></th></tr></thead><tbody>' + (p.kind === 'bulk' && h.covers.length < h.payloads.length && res ? res.map((_, j) => ({ f: h.covers[j % h.covers.length], i: j % h.covers.length, j })) : sorted('covers', h.covers)).map(({ f, i, j }) => {
+    h.covers.length ? '<table><thead><tr>' + sh('covers', 'idx', '#', 'c-idx') + sh('covers', 'name', 'Cover') + (res ? sh('covers', 'saved', 'Saved as', 'c-res2') : sh('covers', 'room', 'Room', 'c-fill')) + '<th class="c-act"></th></tr></thead><tbody>' + (p.kind === 'bulk' && h.covers.length < h.payloads.length && res ? res.map((_, j) => ({ f: h.covers[j % h.covers.length], i: j % h.covers.length, j })) : sorted('covers', h.covers, { room: (f, i) => (items[i] ? items[i].cap + (items[i].extra || 0) : 0), saved: (f, i) => (res && res[i] && res[i].output ? baseName(res[i].output) : '') })).map(({ f, i, j }) => {
       const it = items[i], rr = res && (j != null ? res[j] : split ? res[i] : p.kind === 'bulk' ? res[i] : res[0]);
       const badge = (s) => '<span class="rk ' + riskOf(s)[0] + '">' + Math.round(s) + '</span>';
       const head = '<tr ' + rowAttrs('covers', i) + '><td class="dim">' + (i + 1) + '</td><td class="nm" title="' + esc(f.path) + '">' + nameCell(f) + '</td>';
@@ -372,7 +385,7 @@ function revealZones() {
   const hasRes = !!(S.result && S.result.tab === 'reveal');
   const setRows = hasRes ? S.result.sets.map((x) => '<tr><td></td><td class="nm"><b>split ' + esc(x.set) + '</b></td><td><span class="rk ' + (x.output ? 'low' : 'mid') + '">' + (x.output ? 'rebuilt' : 'needs ' + x.missing) + '</span></td><td class="mono ok">' + (x.output ? esc(baseName(x.output)) : '') + '</td><td></td></tr>').join('') : '';
   const files = zoneShell('reveal', 'Reveal', r.files, listToolbar('reveal', 'addReveal', 'addRevealDir', 'pasteReveal', r.files),
-    r.files.length ? '<table><thead><tr><th class="c-idx">#</th><th>File</th>' + (hasRes ? '<th class="c-state">Result</th><th class="c-res">Saved as</th>' : '<th class="c-size">Size</th>') + '<th class="c-act"></th></tr></thead><tbody>' + sorted('reveal', r.files).map(({ f, i }) => {
+    r.files.length ? '<table><thead><tr>' + sh('reveal', 'idx', '#', 'c-idx') + sh('reveal', 'name', 'File') + (hasRes ? sh('reveal', 'result', 'Result', 'c-state') + sh('reveal', 'saved', 'Saved as', 'c-res') : sh('reveal', 'size', 'Size', 'c-size')) + '<th class="c-act"></th></tr></thead><tbody>' + sorted('reveal', r.files, { result: (f) => ((by[f.name] || [])[0] || {}).status || '', saved: (f) => ((by[f.name] || []).filter((y) => y.output).map((y) => baseName(y.output))[0] || '') }).map(({ f, i }) => {
       const rs = by[f.name] || [], x = rs[0];
       const head = '<tr ' + rowAttrs('reveal', i) + '><td class="dim">' + (i + 1) + '</td><td class="nm" title="' + esc(f.path) + ' (' + fmt(f.size) + ')">' + nameCell(f) + '</td>';
       const tail = '<td class="act">' + rowOps('reveal', i) + '</td></tr>';
@@ -399,16 +412,16 @@ function revealPanel() {
 // ---------------------------------------------------------------- Analyze
 function analyzeZones() {
   const a = S.analyze, res = S.result && S.result.tab === 'analyze' ? S.result.map : {};
-  const rows = sortBy.score ? a.files.map((f, i) => ({ f, i })).sort((x, y) => ((res[y.f.path] || { score: -1 }).score) - ((res[x.f.path] || { score: -1 }).score)) : sorted('analyze', a.files);
-  return [zoneShell('analyze', 'Images to scan', a.files, listToolbar('analyze', 'addAnalyze', 'addAnalyzeDir', 'pasteAnalyze', a.files) + '<button class="tbtn ' + (sortBy.score ? 'pri' : '') + '" data-sortscore title="Sort by score" aria-label="Sort by score">' + ICON.gauge + '</button>',
-    a.files.length ? '<table><thead><tr><th class="c-idx">#</th><th>Image</th><th class="c-size">Size</th><th class="c-state">Score</th><th class="c-gauge">How easy to spot</th><th class="c-act"></th></tr></thead><tbody>' + rows.map(({ f, i }) => {
+  const rows = sorted('analyze', a.files, { score: (f) => (res[f.path] || { score: -1 }).score });
+  return [zoneShell('analyze', 'Images to scan', a.files, listToolbar('analyze', 'addAnalyze', 'addAnalyzeDir', 'pasteAnalyze', a.files),
+    a.files.length ? '<table><thead><tr>' + sh('analyze', 'idx', '#', 'c-idx') + sh('analyze', 'name', 'Image') + sh('analyze', 'size', 'Size', 'c-size') + sh('analyze', 'score', 'Score', 'c-state') + sh('analyze', 'gauge', 'How easy to spot', 'c-gauge') + '<th class="c-act"></th></tr></thead><tbody>' + rows.map(({ f, i }) => {
       const r = res[f.path];
       return '<tr ' + rowAttrs('analyze', i) + '><td class="dim">' + (i + 1) + '</td><td class="nm" title="' + esc(f.path) + '">' + nameCell(f) + '</td><td class="dim">' + esc(f.summary || '') + '</td><td>' + (r && r.score != null ? '<span class="rk ' + r.cls + '">' + Math.round(r.score) + '</span>' : r && r.error ? '<span class="tiny" style="color:var(--red)" title="' + esc(r.error) + '">n/a</span>' : '') + '</td><td>' + (r && r.score != null ? gaugeBar(r.score) : r && r.error ? '<span class="tiny">' + esc(r.error.slice(0, 60)) + '</span>' : '') + '</td><td class="act">' + rowOps('analyze', i) + '</td></tr>';
     }).join('') + '</tbody></table>' : emptyBody('Drop the images to scan here.', 'addAnalyze', 'addAnalyzeDir', 'pasteAnalyze')), ''];
 }
 function analyzePanel() {
   const pr = problems();
-  return '<div class="pb"><div class="sec"><h4>' + ICON.sliders + 'Detectors</h4><div class="tiny" style="line-height:1.6">Chi-square, RS and SPA for images.<br>Calibrated histogram for JPEG.</div></div><div class="sec"><h4>Check</h4><div class="issues">' + (pr.map((p) => '<div class="p">' + ICON.warn + '<span>' + esc(p) + '</span></div>').join('') || '<div class="k">' + ICON.check + '<span>Ready. A low score is a good sign, not proof.</span></div>') + '</div></div></div><div class="runbox"><button class="btn big" id="run" data-run ' + (S.busy || pr.length ? 'disabled' : '') + '>' + (S.busy ? '<span class="spin"></span>' + esc(S.progress || 'Working...') : ICON.play + 'Scan') + '</button></div>';
+  return '<div class="pb"><div class="sec"><h4>' + ICON.sliders + 'Detectors</h4><div class="tiny" style="line-height:1.6">Chi-square, RS and SPA for images.<br>Calibrated histogram for JPEG.</div></div><div class="sec"><h4>Check</h4><div class="issues">' + (pr.map((p) => '<div class="p">' + ICON.warn + '<span>' + esc(p) + '</span></div>').join('') || '<div class="k">' + ICON.check + '<span>Ready. A low score is a good sign, not proof.</span></div>') + '</div></div></div><div class="runbox">' + (S.busy ? '<div class="progtxt" id="progtxt">' + esc(S.progress || '') + '</div>' : '') + '<button class="btn big' + (S.busy ? ' stop' : '') + '" id="run" data-run ' + ((S.busy ? S.stopping : pr.length) ? 'disabled' : '') + '>' + (S.busy ? (S.stopping ? '<span class="spin"></span>Stopping...' : ICON.stop + 'Stop') : ICON.play + 'Scan') + '</button></div>';
 }
 function doneText() {
   const r = S.result;
@@ -505,7 +518,7 @@ function stopJob() {
 
 async function run() {
   if (S.busy || problems().length) return;
-  const h = S.hide, o = S.opts;
+  const h = S.hide, o = S.opts, jobTab = S.tab;
   S.progress = ''; S.result = null;
   setBusy(true);
   try {
@@ -546,7 +559,7 @@ async function run() {
       }
       if (S.stopping) toast('Stopped', { ms: 2500 }); else celebrate(doneText());
     }
-    if (S.tab !== 'analyze') wipe();
+    if (jobTab !== 'analyze') wipe();
   } catch (e) {
     if (S.stopping || /^Stopped\.?$/.test(msgOf(e))) toast('Stopped. Nothing was left half-written.', { ms: 3500 });
     else toast(msgOf(e), { err: true, ms: 7000 });
@@ -592,8 +605,13 @@ document.addEventListener('click', (e) => {
   if (e.target.closest('[data-run]')) { if (S.busy) stopJob(); else run(); return; }
   const row = e.target.closest('tr[data-row]'); if (row) { sel = { list: row.dataset.rk, i: +row.dataset.row }; render(); return; }
   if (e.target.closest('[data-showpass]')) { showPass = !showPass; render(); return; }
-  const sz = e.target.closest('[data-sortz]'); if (sz) { const k = sz.dataset.sortz; sortBy[k] = !sortBy[k] ? 'name' : sortBy[k] === 'name' ? 'size' : ''; render(); return; }
-  if (e.target.closest('[data-sortscore]')) { sortBy.score = !sortBy.score; render(); return; }
+  const th = e.target.closest('[data-sortcol]');
+  if (th) {
+    const [k, col] = th.dataset.sortcol.split(':'), cur = sortBy[k];
+    sortBy[k] = cur && cur.col === col ? { col, dir: -cur.dir } : { col, dir: 1 };
+    render();
+    return;
+  }
   if (e.target.closest('[data-passpaste]')) { pasteModal((lines) => { for (const l of lines) if (!S.reveal.passes.includes(l)) S.reveal.passes.push(l); render(); }, { title: 'Paste passphrases', secret: true, placeholder: 'a passphrase, then Enter', empty: 'No passphrases added yet.' }); return; }
   if (e.target.closest('[data-typetext]')) { typing = !typing; render(); const t = $('#typed'); if (t) t.focus(); return; }
   if (e.target.closest('[data-typecancel]')) { typing = false; typedDraft = ''; render(); return; }
