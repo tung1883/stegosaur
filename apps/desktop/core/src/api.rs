@@ -211,7 +211,7 @@ fn to_spec(dto: JobDto) -> Result<JobSpec, String> {
             };
             JobSpec::Bulk { inputs, recursive, passes, out_dir, names_only, cfg: cfg_full("match", parity, rate, &kdf), text }
         }
-        JobDto::Hide { layout, payloads, covers, second, pass, pass2, k, naming, pattern, out_dir, mode, parity, rate, kdf, overwrite } => {
+        JobDto::Hide { layout, payloads, covers, second, pass, pass2, k, naming, pattern, out_dir, mode, parity, rate, kdf, overwrite, extra } => {
             let covers: Vec<PathBuf> = covers.into_iter().map(PathBuf::from).collect();
             let mut payloads: Vec<Payload> = payloads.into_iter().map(payload_of).collect::<Result<_, _>>()?;
             let cover1 = |c: &Vec<PathBuf>| c.first().cloned().ok_or("Choose where to hide it.".to_string());
@@ -226,10 +226,12 @@ fn to_spec(dto: JobDto) -> Result<JobSpec, String> {
                 }
                 "split" => Layout::Split { payload: first(&mut payloads)?, covers, k },
                 "bulk" => {
-                    if payloads.len() > covers.len() {
-                        return Err(format!("{} files need {} covers, but you chose {}.", payloads.len(), payloads.len(), covers.len()));
+                    // fewer covers than files: the covers are used in turn, each copied as often as needed
+                    if covers.is_empty() {
+                        return Err("Choose where to hide it.".into());
                     }
-                    Layout::Bulk { pairs: payloads.into_iter().zip(covers).collect() }
+                    let n = covers.len();
+                    Layout::Bulk { pairs: payloads.into_iter().enumerate().map(|(j, p)| (p, covers[j % n].clone())).collect() }
                 }
                 other => return Err(format!("Unknown layout: {other}.")),
             };
@@ -238,7 +240,7 @@ fn to_spec(dto: JobDto) -> Result<JobSpec, String> {
                 "pattern" => Naming::Pattern(pattern.filter(|p| !p.trim().is_empty()).unwrap_or_else(|| "{name}_{n}".into())),
                 _ => Naming::Ordinary,
             };
-            JobSpec::Hide(HideSpec { layout, pass: secret(pass), cfg: cfg_full(&mode, parity, rate, &kdf), naming, out_dir: opt_path(out_dir), overwrite })
+            JobSpec::Hide(HideSpec { layout, pass: secret(pass), cfg: cfg_full(&mode, parity, rate, &kdf), naming, out_dir: opt_path(out_dir), overwrite, extra })
         }
         JobDto::Reveal { carrier, pass, output, parity, rate, overwrite } => {
             let carrier = PathBuf::from(carrier);

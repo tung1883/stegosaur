@@ -9,7 +9,8 @@ use crate::app::config::AppConfig;
 use crate::app::jobs::{check_ext, check_output, report_of, require_pass};
 use crate::app::secret::Secret;
 use crate::carrier::{is_audio_ext, AnyCarrier};
-use crate::container::{embed_deniable, embed_single};
+use crate::container::{embed_deniable, embed_single, embed_single_keys, single_capacity};
+use crate::overflow;
 use crate::distribute::distribute;
 use crate::error::{Error, Result};
 use crate::tag::{self, Kind};
@@ -46,6 +47,31 @@ impl Payload {
                 } else {
                     Ok(t.as_bytes().to_vec())
                 }
+            }
+        }
+    }
+
+    fn len(&self) -> Result<u64> {
+        match self {
+            Self::File(p) => Ok(std::fs::metadata(p)?.len()),
+            Self::Text(t) => Ok(t.as_bytes().len() as u64),
+        }
+    }
+
+    /// The first `n` bytes in memory and a reader positioned after them, so the rest can be streamed.
+    fn split(&self, n: usize) -> Result<(Vec<u8>, Box<dyn std::io::Read>)> {
+        use std::io::Read;
+        match self {
+            Self::File(p) => {
+                let mut f = std::fs::File::open(p)?;
+                let mut head = Vec::with_capacity(n);
+                (&mut f).take(n as u64).read_to_end(&mut head)?;
+                Ok((head, Box::new(std::io::BufReader::new(f))))
+            }
+            Self::Text(_) => {
+                let all = self.read()?;
+                let n = n.min(all.len());
+                Ok((all[..n].to_vec(), Box::new(std::io::Cursor::new(all[n..].to_vec()))))
             }
         }
     }
@@ -87,6 +113,9 @@ pub struct HideSpec {
     pub naming: Naming,
     pub out_dir: Option<PathBuf>,
     pub overwrite: bool,
+    /// Single and bulk layouts: when the cover is too small, put the rest in an encrypted block at the
+    /// end of the output file (PNG, BMP and WAV only).
+    pub extra: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -168,6 +197,35 @@ fn load_for(cover: &Path, output: &Path) -> Result<AnyCarrier> {
     Ok(c)
 }
 
+/// Hides one file in one cover and writes the result. When the file is larger than the cover holds and
+/// extra room is on, the pixels or samples take what they can and the rest is streamed into an encrypted
+/// block at the end of the output file. Returns the payload size and the measured report.
+fn hide_one(c: &mut AnyCarrier, payload: &Payload, pass: &Secret, cfg: &crate::container::Config, extra: bool, out: &Path) -> Result<(usize, Option<Report>)> {
+    let total = payload.len()?;
+    let cap = single_capacity(c, cfg);
+    if total as usize <= cap || !extra {
+        let data = payload.read()?;
+        embed_single(c, pass.as_bytes(), &data, cfg)?;
+        c.save(out)?;
+        return Ok((data.len(), report_of(c)));
+    }
+    if !overflow::supports(&ext_of(out)) {
+        return Err(Error::Invalid("this kind of file cannot take extra room; use a PNG, BMP or WAV cover, or a bigger one".into()));
+    }
+    if cap == 0 {
+        return Err(Error::Invalid("this cover is too small even for extra room".into()));
+    }
+    let (head, mut rest) = payload.split(cap)?;
+    let keys = embed_single_keys(c, pass.as_bytes(), &head, cfg)?;
+    drop(head);
+    c.save(out)?;
+    if let Err(e) = overflow::append(out, &keys, &mut rest) {
+        let _ = std::fs::remove_file(out);
+        return Err(e);
+    }
+    Ok((total as usize, report_of(c)))
+}
+
 pub fn run_hide(spec: HideSpec, step: &mut dyn FnMut(&str)) -> Result<HideDone> {
     require_pass(&spec.pass)?;
     let cfg = spec.cfg.to_config();
@@ -179,16 +237,17 @@ pub fn run_hide(spec: HideSpec, step: &mut dyn FnMut(&str)) -> Result<HideDone> 
             let outs = plan_outputs(&spec, &[(cover.as_path(), payload.stem())], if same { Kind::Hidden } else { Kind::Single }, &inputs)?;
             step("Reading the cover");
             let mut c = load_for(cover, &outs[0])?;
-            let data = payload.read()?;
             step("Deriving the key and hiding the data");
-            if same {
+            let (bytes, report) = if same {
+                let data = payload.read()?;
                 embed_deniable(&mut c, (spec.pass.as_bytes(), &data), None, &cfg)?;
+                step("Writing the new file");
+                c.save(&outs[0])?;
+                (data.len(), report_of(&c))
             } else {
-                embed_single(&mut c, spec.pass.as_bytes(), &data, &cfg)?;
-            }
-            step("Writing the new file");
-            c.save(&outs[0])?;
-            Ok(HideDone { kind: if same { "same_look" } else { "single" }, items: vec![HideItem { what: payload.name(), cover: cover.clone(), output: Some(outs[0].clone()), bytes: data.len(), report: report_of(&c), error: None }] })
+                hide_one(&mut c, payload, &spec.pass, &cfg, spec.extra, &outs[0])?
+            };
+            Ok(HideDone { kind: if same { "same_look" } else { "single" }, items: vec![HideItem { what: payload.name(), cover: cover.clone(), output: Some(outs[0].clone()), bytes, report, error: None }] })
         }
         Layout::Two { payload, second, second_pass, cover } => {
             require_pass(second_pass)?;
@@ -248,10 +307,7 @@ pub fn run_hide(spec: HideSpec, step: &mut dyn FnMut(&str)) -> Result<HideDone> 
                 step(&format!("Hiding {} of {}: {}", i + 1, total, payload.name()));
                 let one = (|| -> Result<(usize, Option<Report>)> {
                     let mut c = load_for(cover, &out)?;
-                    let data = payload.read()?;
-                    embed_single(&mut c, spec.pass.as_bytes(), &data, &cfg)?;
-                    c.save(&out)?;
-                    Ok((data.len(), report_of(&c)))
+                    hide_one(&mut c, payload, &spec.pass, &cfg, spec.extra, &out)
                 })();
                 items.push(match one {
                     Ok((bytes, report)) => HideItem { what: payload.name(), cover: cover.clone(), output: Some(out), bytes, report, error: None },

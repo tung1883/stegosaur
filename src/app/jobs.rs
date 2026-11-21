@@ -10,7 +10,7 @@ use crate::app::friendly;
 use crate::app::secret::Secret;
 use crate::carrier::AnyCarrier;
 use crate::corpora::Style;
-use crate::container::{embed_deniable, embed_single, extract_deniable, extract_single};
+use crate::container::{embed_deniable, embed_single, extract_deniable, extract_single_keys};
 use crate::distribute::{distribute, recover};
 use crate::error::{Error, Result};
 use std::path::{Path, PathBuf};
@@ -226,14 +226,26 @@ pub fn run(spec: JobSpec, emit: &mut dyn FnMut(JobEvent)) -> Result<JobResult> {
             let c = AnyCarrier::load(&carrier)?;
             let conf = cfg.to_config();
             step("Deriving the key and looking for hidden data");
-            let (data, layout) = match extract_single(&c, pass.as_bytes(), &conf) {
-                Ok(d) => (d, RevealLayout::Single),
-                Err(Error::NoPayload) => (extract_deniable(&c, pass.as_bytes(), &conf)?, RevealLayout::Hidden),
+            let (data, layout, keys) = match extract_single_keys(&c, pass.as_bytes(), &conf) {
+                Ok((d, k)) => (d, RevealLayout::Single, Some(k)),
+                Err(Error::NoPayload) => (extract_deniable(&c, pass.as_bytes(), &conf)?, RevealLayout::Hidden, None),
                 Err(e) => return Err(e),
             };
             step("Saving the recovered file");
             std::fs::write(&output, &data)?;
-            Ok(JobResult::Revealed { output, bytes: data.len(), layout })
+            let mut bytes = data.len();
+            if let Some(k) = keys {
+                let mut f = std::fs::OpenOptions::new().append(true).open(&output)?;
+                match crate::overflow::read(&carrier, &k, &mut f) {
+                    Ok(Some(n)) => bytes += n as usize,
+                    Ok(None) => {}
+                    Err(e) => {
+                        let _ = std::fs::remove_file(&output);
+                        return Err(e);
+                    }
+                }
+            }
+            Ok(JobResult::Revealed { output, bytes, layout })
         }
         JobSpec::Join { carriers, pass, output, cfg, overwrite } => {
             let inputs: Vec<&Path> = carriers.iter().map(|p| p.as_path()).collect();

@@ -2,7 +2,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use stegosaur::analysis::analyze;
 use stegosaur::container::{
-    deniable_capacity, embed_deniable, embed_single, extract_deniable, extract_single, single_capacity,
+    deniable_capacity, embed_deniable, embed_single, extract_deniable, single_capacity,
 };
 use stegosaur::distribute::{distribute, recover};
 use stegosaur::corpora::Style;
@@ -107,6 +107,10 @@ enum Cmd {
         /// Passphrase (or set STEGOSAUR_PASS)
         #[arg(long, env = "STEGOSAUR_PASS", hide_env_values = true)]
         pass: String,
+        /// When the file is bigger than the cover holds, put the rest in an encrypted block at the end of the
+        /// output (PNG, BMP and WAV only). `extract` finds it again by itself.
+        #[arg(long)]
+        extra_room: bool,
         #[command(flatten)]
         common: Common,
     },
@@ -240,18 +244,41 @@ fn model(style: StyleArg, corpus: &Option<PathBuf>, top_k: Option<usize>, order:
 
 fn run(cli: Cli) -> Result<()> {
     match cli.cmd {
-        Cmd::Embed { carrier, out, data, pass, common } => {
+        Cmd::Embed { carrier, out, data, pass, extra_room, common } => {
             let mut c = AnyCarrier::load(&carrier)?;
-            let bytes = std::fs::read(data)?;
-            embed_single(&mut c, pass.as_bytes(), &bytes, &config(&common, 0.1))?;
-            c.save(&out)?;
-            println!("hid {} bytes of {} available in {}", bytes.len(), single_capacity(&c, &config(&common, 0.1)), out.display());
+            let cfg = config(&common, 0.1);
+            let cap = single_capacity(&c, &cfg);
+            let total = std::fs::metadata(&data)?.len() as usize;
+            if extra_room && total > cap {
+                use std::io::Read;
+                let ext = out.extension().and_then(|e| e.to_str()).unwrap_or("");
+                if !stegosaur::overflow::supports(ext) {
+                    return Err(Error::Invalid("extra room needs a PNG, BMP or WAV output".into()));
+                }
+                let mut f = std::fs::File::open(&data)?;
+                let mut head = Vec::with_capacity(cap);
+                (&mut f).take(cap as u64).read_to_end(&mut head)?;
+                let keys = stegosaur::container::embed_single_keys(&mut c, pass.as_bytes(), &head, &cfg)?;
+                c.save(&out)?;
+                let extra = stegosaur::overflow::append(&out, &keys, &mut std::io::BufReader::new(f))?;
+                println!("hid {} bytes: {} in the picture or sound and {} extra at the end of {}", total, head.len(), extra, out.display());
+            } else {
+                let bytes = std::fs::read(data)?;
+                embed_single(&mut c, pass.as_bytes(), &bytes, &cfg)?;
+                c.save(&out)?;
+                println!("hid {} bytes of {} available in {}", bytes.len(), cap, out.display());
+            }
         }
         Cmd::Extract { carrier, out, pass, parity } => {
             let c = AnyCarrier::load(&carrier)?;
-            let bytes = extract_single(&c, pass.as_bytes(), &Config { parity, ..Config::default() })?;
+            let (bytes, keys) = stegosaur::container::extract_single_keys(&c, pass.as_bytes(), &Config { parity, ..Config::default() })?;
             std::fs::write(&out, &bytes)?;
-            println!("recovered {} bytes", bytes.len());
+            let mut total = bytes.len();
+            let mut f = std::fs::OpenOptions::new().append(true).open(&out)?;
+            if let Some(n) = stegosaur::overflow::read(&carrier, &keys, &mut f)? {
+                total += n as usize;
+            }
+            println!("recovered {} bytes", total);
         }
         Cmd::HiddenEmbed { carrier, out, public_data, public_pass, hidden_data, hidden_pass, rate, common } => {
             let cfg = config(&common, rate);

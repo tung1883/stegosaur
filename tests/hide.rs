@@ -26,7 +26,7 @@ fn file(d: &Path, name: &str, bytes: &[u8]) -> PathBuf {
 }
 
 fn spec(layout: Layout, pass: &str, naming: Naming) -> HideSpec {
-    HideSpec { layout, pass: Secret::new(pass), cfg: cfg(), naming, out_dir: None, overwrite: false }
+    HideSpec { layout, pass: Secret::new(pass), cfg: cfg(), naming, out_dir: None, overwrite: false, extra: false }
 }
 
 fn go(s: HideSpec) -> stegosaur::Result<stegosaur::app::hide::HideDone> {
@@ -143,4 +143,22 @@ fn nothing_is_ever_overwritten() {
     // the cover is never used as its own output
     let r2 = go(spec(Layout::Single { payload: Payload::Text(Secret::new("x")), cover: c }, "pw", Naming::Pattern("{name}".into())));
     assert!(r2.is_err());
+}
+
+#[test]
+fn one_cover_can_be_used_for_every_file() {
+    let d = tempfile::tempdir().unwrap();
+    let c = cover(d.path(), "beach.png", 11);
+    let a = file(d.path(), "a.bin", b"first secret");
+    let b = file(d.path(), "b.bin", b"second secret, a bit longer");
+    let before = std::fs::read(&c).unwrap();
+    let done = go(spec(Layout::Bulk { pairs: vec![(Payload::File(a), c.clone()), (Payload::File(b), c.clone())] }, "pw", Naming::Suffix)).unwrap();
+    assert_eq!(done.items.len(), 2);
+    let outs: Vec<PathBuf> = done.items.iter().map(|i| i.output.clone().unwrap()).collect();
+    assert_ne!(outs[0], outs[1]);
+    for (out, want) in outs.iter().zip([&b"first secret"[..], &b"second secret, a bit longer"[..]]) {
+        let img = AnyCarrier::load(out).unwrap();
+        assert_eq!(extract_single(&img, b"pw", &cfg().to_config()).unwrap(), want);
+    }
+    assert_eq!(std::fs::read(&c).unwrap(), before, "the cover itself is not changed");
 }

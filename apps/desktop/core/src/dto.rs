@@ -189,6 +189,9 @@ pub enum JobDto {
         kdf: String,
         #[serde(default)]
         overwrite: bool,
+        /// Use an encrypted block at the end of the file when the cover is too small.
+        #[serde(default = "default_true")]
+        extra: bool,
     },
     Embed {
         carrier: String,
@@ -384,4 +387,8 @@ pub struct TextEstimateDto {
     pub lines: usize,
     pub bits_per_word: f64,
     pub well_formed: Option<u8>,
+}
+
+fn default_true() -> bool {
+    true
 }

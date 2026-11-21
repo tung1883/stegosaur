@@ -8,7 +8,7 @@
 use crate::app::config::AppConfig;
 use crate::app::secret::Secret;
 use crate::carrier::{ext_of, is_audio_ext, is_image_ext, is_jpeg_ext, AnyCarrier};
-use crate::container::{extract_deniable, extract_single};
+use crate::container::{extract_deniable, extract_single_keys};
 use crate::distribute::{combine_group, ShareBlob};
 use crate::error::{Error, Result};
 use crate::tag::{check_name, Kind};
@@ -177,13 +177,26 @@ fn look_at(file: &Path, opts: &BulkOptions) -> FileResult {
         };
         let mut hit = false;
         if try_single {
-            if let Ok(raw) = extract_single(&carrier, pass.as_bytes(), &cfg) {
+            if let Ok((raw, keys)) = extract_single_keys(&carrier, pass.as_bytes(), &cfg) {
                 hit = true;
                 if let Some(blob) = ShareBlob::decode(&raw) {
                     entry.found.push(Found::Share { set: hex(&blob.id), k: blob.k, n: blob.n, pass_index: pi });
                     shares.push((blob, file.to_path_buf()));
                 } else if let Ok(path) = write_new(&opts.out_dir, &numbered(stem, &mut idx_for_file), &raw) {
-                    entry.found.push(Found::File { layout: "one file", path, bytes: raw.len(), pass_index: pi });
+                    let mut bytes = raw.len();
+                    if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(&path) {
+                        match crate::overflow::read(file, &keys, &mut f) {
+                            Ok(Some(n)) => bytes += n as usize,
+                            Ok(None) => {}
+                            Err(_) => {
+                                let _ = std::fs::remove_file(&path);
+                                bytes = 0;
+                            }
+                        }
+                    }
+                    if bytes > 0 {
+                        entry.found.push(Found::File { layout: "one file", path, bytes, pass_index: pi });
+                    }
                 }
             }
         }

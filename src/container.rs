@@ -70,7 +70,7 @@ fn region(layout: Layout, idx: usize, n: usize) -> (usize, usize) {
 }
 
 /// One scrypt run per passphrase and carrier; slot keys for each region are split off with HKDF.
-fn master(pass: &[u8], geometry: &[u8], layout: Layout, kdf: KdfParams) -> Result<[u8; 32]> {
+pub(crate) fn master(pass: &[u8], geometry: &[u8], layout: Layout, kdf: KdfParams) -> Result<[u8; 32]> {
     if pass.is_empty() {
         return Err(Error::Invalid("passphrase must not be empty".into()));
     }
@@ -144,7 +144,13 @@ pub fn single_capacity<C: Carrier + ?Sized>(c: &C, cfg: &Config) -> usize {
 }
 
 pub fn embed_single<C: Carrier + ?Sized>(c: &mut C, pass: &[u8], data: &[u8], cfg: &Config) -> Result<()> {
-    let keys = slot_keys(&master(pass, &c.geometry(), Layout::Single, cfg.kdf)?, 0);
+    embed_single_keys(c, pass, data, cfg).map(|_| ())
+}
+
+/// Like [`embed_single`], and also returns the keys for an overflow block (see [`crate::overflow`]).
+pub fn embed_single_keys<C: Carrier + ?Sized>(c: &mut C, pass: &[u8], data: &[u8], cfg: &Config) -> Result<crate::overflow::TailKeys> {
+    let m = master(pass, &c.geometry(), Layout::Single, cfg.kdf)?;
+    let keys = slot_keys(&m, 0);
     let sealed = crypto::seal(&keys.aead, data)?;
     let header = ((sealed.len() as u32) ^ u32::from_le_bytes(keys.mask)).to_le_bytes();
     let mut frame = wire(&header, cfg.parity)?;
@@ -167,11 +173,17 @@ pub fn embed_single<C: Carrier + ?Sized>(c: &mut C, pass: &[u8], data: &[u8], cf
     } else {
         write_bytes(c, &stream.take(frame.len() * 8), &frame, cfg.mode, &mut rng);
     }
-    Ok(())
+    Ok(crate::overflow::tail_keys(&m))
 }
 
 pub fn extract_single<C: Carrier + ?Sized>(c: &C, pass: &[u8], cfg: &Config) -> Result<Vec<u8>> {
-    let keys = slot_keys(&master(pass, &c.geometry(), Layout::Single, cfg.kdf)?, 0);
+    extract_single_keys(c, pass, cfg).map(|(d, _)| d)
+}
+
+/// Like [`extract_single`], and also returns the keys for an overflow block.
+pub fn extract_single_keys<C: Carrier + ?Sized>(c: &C, pass: &[u8], cfg: &Config) -> Result<(Vec<u8>, crate::overflow::TailKeys)> {
+    let m = master(pass, &c.geometry(), Layout::Single, cfg.kdf)?;
+    let keys = slot_keys(&m, 0);
     let (start, len) = region(Layout::Single, 0, c.len());
     let head_wire = wire_len(4, cfg.parity);
     if len / 8 < head_wire + wire_len(SEALED_OVERHEAD, cfg.parity) {
@@ -190,7 +202,7 @@ pub fn extract_single<C: Carrier + ?Sized>(c: &C, pass: &[u8], cfg: &Config) -> 
     } else {
         read_bytes(c, &stream.take(body_wire * 8))
     };
-    open_coded(&keys.aead, &raw, sealed_len, cfg.parity)
+    Ok((open_coded(&keys.aead, &raw, sealed_len, cfg.parity)?, crate::overflow::tail_keys(&m)))
 }
 
 /// Sealed length that fits a slot of `slot_bytes` on the wire.

@@ -11,6 +11,7 @@ pub mod error;
 pub mod gf;
 pub mod jpeg;
 pub mod linguistic;
+pub mod overflow;
 pub mod shamir;
 pub mod stc;
 pub mod tag;
