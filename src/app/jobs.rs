@@ -145,13 +145,13 @@ pub fn run(spec: JobSpec, emit: &mut dyn FnMut(JobEvent)) -> Result<JobResult> {
         JobSpec::Embed { carrier, payload, output, pass, cfg, overwrite } => {
             check_output(&output, &[&carrier, &payload], overwrite)?;
             require_pass(&pass)?;
-            step("Reading the cover file");
+            step("Reading the cover file"); crate::cancel::check()?;
             let mut c = AnyCarrier::load(&carrier)?;
             check_ext(&output, &c)?;
             let data = std::fs::read(&payload)?;
-            step("Deriving the key and hiding the data");
+            step("Deriving the key and hiding the data"); crate::cancel::check()?;
             embed_single(&mut c, pass.as_bytes(), &data, &cfg.to_config())?;
-            step("Writing the new file");
+            step("Writing the new file"); crate::cancel::check()?;
             c.save(&output)?;
             Ok(JobResult::Embedded { output, bytes: data.len(), report: report_of(&c) })
         }
@@ -165,7 +165,7 @@ pub fn run(spec: JobSpec, emit: &mut dyn FnMut(JobEvent)) -> Result<JobResult> {
             if let Some((_, hp)) = &hidden {
                 require_pass(hp)?;
             }
-            step("Reading the cover file");
+            step("Reading the cover file"); crate::cancel::check()?;
             let mut c = AnyCarrier::load(&carrier)?;
             check_ext(&output, &c)?;
             let public = std::fs::read(&public_file)?;
@@ -173,14 +173,14 @@ pub fn run(spec: JobSpec, emit: &mut dyn FnMut(JobEvent)) -> Result<JobResult> {
                 Some((p, hp)) => Some((std::fs::read(p)?, hp.clone())),
                 None => None,
             };
-            step("Deriving keys and filling both slots");
+            step("Deriving keys and filling both slots"); crate::cancel::check()?;
             embed_deniable(
                 &mut c,
                 (public_pass.as_bytes(), &public),
                 hidden_data.as_ref().map(|(d, hp)| (hp.as_bytes(), d.as_slice())),
                 &cfg.to_config(),
             )?;
-            step("Writing the new file");
+            step("Writing the new file"); crate::cancel::check()?;
             c.save(&output)?;
             Ok(JobResult::Hidden { output, report: report_of(&c) })
         }
@@ -205,15 +205,15 @@ pub fn run(spec: JobSpec, emit: &mut dyn FnMut(JobEvent)) -> Result<JobResult> {
                     return Err(Error::Invalid("two selected images would produce the same output name".into()));
                 }
             }
-            step("Reading the images");
+            step("Reading the images"); crate::cancel::check()?;
             let mut loaded = carriers.iter().map(|p| AnyCarrier::load(p)).collect::<Result<Vec<_>>>()?;
             for (c, o) in loaded.iter().zip(&outputs) {
                 check_ext(o, c)?;
             }
             let data = std::fs::read(&secret)?;
-            step("Splitting the secret and hiding one share per image");
+            step("Splitting the secret and hiding one share per image"); crate::cancel::check()?;
             distribute(&data, pass.as_bytes(), k, &mut loaded, &cfg.to_config())?;
-            step("Writing the new files");
+            step("Writing the new files"); crate::cancel::check()?;
             for (c, o) in loaded.iter().zip(&outputs) {
                 c.save(o)?;
             }
@@ -222,16 +222,16 @@ pub fn run(spec: JobSpec, emit: &mut dyn FnMut(JobEvent)) -> Result<JobResult> {
         JobSpec::Reveal { carrier, pass, output, cfg, overwrite } => {
             check_output(&output, &[&carrier], overwrite)?;
             require_pass(&pass)?;
-            step("Reading the file");
+            step("Reading the file"); crate::cancel::check()?;
             let c = AnyCarrier::load(&carrier)?;
             let conf = cfg.to_config();
-            step("Deriving the key and looking for hidden data");
+            step("Deriving the key and looking for hidden data"); crate::cancel::check()?;
             let (data, layout, keys) = match extract_single_keys(&c, pass.as_bytes(), &conf) {
                 Ok((d, k)) => (d, RevealLayout::Single, Some(k)),
                 Err(Error::NoPayload) => (extract_deniable(&c, pass.as_bytes(), &conf)?, RevealLayout::Hidden, None),
                 Err(e) => return Err(e),
             };
-            step("Saving the recovered file");
+            step("Saving the recovered file"); crate::cancel::check()?;
             std::fs::write(&output, &data)?;
             let mut bytes = data.len();
             if let Some(k) = keys {
@@ -251,14 +251,14 @@ pub fn run(spec: JobSpec, emit: &mut dyn FnMut(JobEvent)) -> Result<JobResult> {
             let inputs: Vec<&Path> = carriers.iter().map(|p| p.as_path()).collect();
             check_output(&output, &inputs, overwrite)?;
             require_pass(&pass)?;
-            step("Reading the images");
+            step("Reading the images"); crate::cancel::check()?;
             let loaded: Vec<AnyCarrier> = carriers.iter().filter_map(|p| AnyCarrier::load(p).ok()).collect();
             if loaded.is_empty() {
                 return Err(Error::Invalid("none of the selected files could be read".into()));
             }
-            step("Collecting shares and rebuilding the secret");
+            step("Collecting shares and rebuilding the secret"); crate::cancel::check()?;
             let data = recover(pass.as_bytes(), &loaded, &cfg.to_config())?;
-            step("Saving the recovered file");
+            step("Saving the recovered file"); crate::cancel::check()?;
             std::fs::write(&output, &data)?;
             Ok(JobResult::Joined { output, bytes: data.len(), used: loaded.len() })
         }
@@ -267,7 +267,7 @@ pub fn run(spec: JobSpec, emit: &mut dyn FnMut(JobEvent)) -> Result<JobResult> {
             Ok(JobResult::Hide(done))
         }
         JobSpec::Bulk { inputs, recursive, passes, out_dir, names_only, cfg, text } => {
-            step("Listing the files");
+            step("Listing the files"); crate::cancel::check()?;
             let mut files: Vec<PathBuf> = Vec::new();
             for p in &inputs {
                 if p.is_dir() {
@@ -294,9 +294,9 @@ pub fn run(spec: JobSpec, emit: &mut dyn FnMut(JobEvent)) -> Result<JobResult> {
             if message.is_empty() {
                 return Err(Error::Invalid("the message must not be empty".into()));
             }
-            step("Preparing the language model");
+            step("Preparing the language model"); crate::cancel::check()?;
             let _ = crate::app::text::model(style, order, None);
-            step("Encrypting and writing the cover text");
+            step("Encrypting and writing the cover text"); crate::cancel::check()?;
             let text = crate::app::text::hide(style, order, &pass, &message, cfg.kdf)?;
             if let Some(path) = &save {
                 std::fs::write(path, &text)?;
@@ -309,11 +309,11 @@ pub fn run(spec: JobSpec, emit: &mut dyn FnMut(JobEvent)) -> Result<JobResult> {
                 check_output(path, &[&text_file], overwrite)?;
             }
             require_pass(&pass)?;
-            step("Reading the text");
+            step("Reading the text"); crate::cancel::check()?;
             let text = std::fs::read_to_string(&text_file)?;
-            step("Preparing the language model");
+            step("Preparing the language model"); crate::cancel::check()?;
             let _ = crate::app::text::model(style, order, None);
-            step("Decoding and decrypting");
+            step("Decoding and decrypting"); crate::cancel::check()?;
             let bytes = crate::app::text::reveal(style, order, &pass, &text, cfg.kdf)?;
             if let Some(path) = &save {
                 std::fs::write(path, &bytes)?;
@@ -321,9 +321,9 @@ pub fn run(spec: JobSpec, emit: &mut dyn FnMut(JobEvent)) -> Result<JobResult> {
             Ok(JobResult::TextRevealed { bytes, saved: save })
         }
         JobSpec::Analyze { image } => {
-            step("Reading the image");
+            step("Reading the image"); crate::cancel::check()?;
             let c = AnyCarrier::load(&image)?;
-            step("Running the detectors");
+            step("Running the detectors"); crate::cancel::check()?;
             match c {
                 AnyCarrier::Image(img) => Ok(JobResult::Analyzed { report: analyze(&img) }),
                 AnyCarrier::Jpeg(j) => crate::analysis::analyze_jpeg(&j)

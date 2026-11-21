@@ -241,6 +241,9 @@ pub fn run(files: &[PathBuf], opts: &BulkOptions, progress: &mut dyn FnMut(usize
                 if i >= total {
                     break;
                 }
+                if crate::cancel::requested() {
+                    break;
+                }
                 let r = look_at(&files[i], opts);
                 if tx.send((i, r)).is_err() {
                     break;
@@ -255,6 +258,7 @@ pub fn run(files: &[PathBuf], opts: &BulkOptions, progress: &mut dyn FnMut(usize
             results[i] = Some(r);
         }
     });
+    crate::cancel::check()?;
 
     let mut report = BulkReport { out_dir: opts.out_dir.clone(), ..Default::default() };
     let mut groups: BTreeMap<String, Vec<(ShareBlob, PathBuf)>> = BTreeMap::new();

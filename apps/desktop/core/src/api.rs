@@ -515,6 +515,7 @@ impl Core {
             }
         };
         let id = self.next_job.fetch_add(1, Ordering::SeqCst);
+        stegosaur::cancel::reset();
         let (handle, running) = (jobs::spawn(spec), self.running.clone());
         std::thread::spawn(move || {
             for ev in handle.events.iter() {
@@ -532,6 +533,11 @@ impl Core {
             running.store(false, Ordering::SeqCst);
         });
         Ok(id)
+    }
+
+    /// Asks the running job to stop at its next safe point.
+    pub fn cancel_job(&self) {
+        stegosaur::cancel::request();
     }
 
     /// Writes generated cover text to a file the person chose. Never overwrites a different kind of file silently:

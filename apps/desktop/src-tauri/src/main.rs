@@ -54,6 +54,11 @@ async fn views(state: State<'_, AppState>, req: ViewsReq) -> Result<Response, St
 }
 
 #[tauri::command]
+fn cancel_job(state: State<AppState>) {
+    state.0.cancel_job();
+}
+
+#[tauri::command]
 fn start_job(app: AppHandle, state: State<AppState>, job: JobDto) -> Result<u64, String> {
     state.0.start_job(job, move |event| {
         let _ = app.emit("job", event);
@@ -69,7 +74,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState(Arc::new(Core::new())))
-        .invoke_handler(tauri::generate_handler![defaults, roots, list_dir, describe, save_text, preview, views, start_job, text_estimate])
+        .invoke_handler(tauri::generate_handler![defaults, roots, list_dir, describe, save_text, preview, views, start_job, cancel_job, text_estimate])
         .run(tauri::generate_context!())
         .expect("error while running Stegosaur");
 }

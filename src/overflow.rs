@@ -57,6 +57,7 @@ pub fn append(out: &Path, keys: &TailKeys, rest: &mut dyn Read) -> Result<u64> {
     let mut total = 0u64;
     let mut idx = 0u64;
     loop {
+        crate::cancel::check()?;
         let n = fill(rest, &mut buf)?;
         if n == 0 {
             break;

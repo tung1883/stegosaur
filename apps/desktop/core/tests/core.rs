@@ -396,8 +396,8 @@ fn hide_job_reports_mistakes_in_plain_words() {
     let c = png(d.path(), "c.png", 100, 100, 4);
     let a = file(d.path(), "a.bin", &data(50, 1));
     let core = Core::new();
-    let e = core.start_job(serde_json::from_value(json!({"kind":"hide","layout":"bulk","payloads":[{"path":s(&a)},{"path":s(&a)}],"covers":[s(&c)],"pass":"x"})).unwrap(), |_| {}).unwrap_err();
-    assert!(e.contains("2 files need 2 covers"), "{e}");
+    let e = core.start_job(serde_json::from_value(json!({"kind":"hide","layout":"bulk","payloads":[{"path":s(&a)},{"path":s(&a)}],"covers":[],"pass":"x"})).unwrap(), |_| {}).unwrap_err();
+    assert!(e.contains("Choose where to hide it"), "{e}");
     let e = core.start_job(serde_json::from_value(json!({"kind":"hide","layout":"two","payloads":[{"path":s(&a)}],"covers":[s(&c)],"pass":"x"})).unwrap(), |_| {}).unwrap_err();
     assert!(e.contains("second secret"), "{e}");
     // the slot is free again after a rejected request

@@ -16,6 +16,8 @@ pub enum Error {
     Unsupported(String),
     #[error("invalid input: {0}")]
     Invalid(String),
+    #[error("stopped")]
+    Cancelled,
     #[error("crypto failure")]
     Crypto,
 }

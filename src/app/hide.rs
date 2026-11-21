@@ -235,13 +235,13 @@ pub fn run_hide(spec: HideSpec, step: &mut dyn FnMut(&str)) -> Result<HideDone> 
             let mut inputs: Vec<&Path> = vec![cover];
             inputs.extend(payload.path());
             let outs = plan_outputs(&spec, &[(cover.as_path(), payload.stem())], if same { Kind::Hidden } else { Kind::Single }, &inputs)?;
-            step("Reading the cover");
+            step("Reading the cover"); crate::cancel::check()?;
             let mut c = load_for(cover, &outs[0])?;
-            step("Deriving the key and hiding the data");
+            step("Deriving the key and hiding the data"); crate::cancel::check()?;
             let (bytes, report) = if same {
                 let data = payload.read()?;
                 embed_deniable(&mut c, (spec.pass.as_bytes(), &data), None, &cfg)?;
-                step("Writing the new file");
+                step("Writing the new file"); crate::cancel::check()?;
                 c.save(&outs[0])?;
                 (data.len(), report_of(&c))
             } else {
@@ -258,12 +258,12 @@ pub fn run_hide(spec: HideSpec, step: &mut dyn FnMut(&str)) -> Result<HideDone> 
             inputs.extend(payload.path());
             inputs.extend(second.path());
             let outs = plan_outputs(&spec, &[(cover.as_path(), payload.stem())], Kind::Hidden, &inputs)?;
-            step("Reading the cover");
+            step("Reading the cover"); crate::cancel::check()?;
             let mut c = load_for(cover, &outs[0])?;
             let (a, b) = (payload.read()?, second.read()?);
-            step("Deriving both keys and filling both slots");
+            step("Deriving both keys and filling both slots"); crate::cancel::check()?;
             embed_deniable(&mut c, (spec.pass.as_bytes(), &a), Some((second_pass.as_bytes(), &b)), &cfg)?;
-            step("Writing the new file");
+            step("Writing the new file"); crate::cancel::check()?;
             c.save(&outs[0])?;
             Ok(HideDone { kind: "two", items: vec![HideItem { what: format!("{} and {}", payload.name(), second.name()), cover: cover.clone(), output: Some(outs[0].clone()), bytes: a.len() + b.len(), report: report_of(&c), error: None }] })
         }
@@ -275,15 +275,15 @@ pub fn run_hide(spec: HideSpec, step: &mut dyn FnMut(&str)) -> Result<HideDone> 
             inputs.extend(payload.path());
             let pairs: Vec<(&Path, String)> = covers.iter().map(|c| (c.as_path(), payload.stem())).collect();
             let outs = plan_outputs(&spec, &pairs, Kind::Share, &inputs)?;
-            step("Reading the covers");
+            step("Reading the covers"); crate::cancel::check()?;
             let mut loaded = Vec::new();
             for (c, o) in covers.iter().zip(&outs) {
                 loaded.push(load_for(c, o)?);
             }
             let data = payload.read()?;
-            step("Splitting the secret and hiding one piece in each cover");
+            step("Splitting the secret and hiding one piece in each cover"); crate::cancel::check()?;
             distribute(&data, spec.pass.as_bytes(), (*k).clamp(1, covers.len() as u8), &mut loaded, &cfg)?;
-            step("Writing the new files");
+            step("Writing the new files"); crate::cancel::check()?;
             for (c, o) in loaded.iter().zip(&outs) {
                 c.save(o)?;
             }
@@ -304,7 +304,7 @@ pub fn run_hide(spec: HideSpec, step: &mut dyn FnMut(&str)) -> Result<HideDone> 
             let mut items = Vec::new();
             let total = pairs.len();
             for (i, ((payload, cover), out)) in pairs.iter().zip(outs).enumerate() {
-                step(&format!("Hiding {} of {}: {}", i + 1, total, payload.name()));
+                step(&format!("Hiding {} of {}: {}", i + 1, total, payload.name())); crate::cancel::check()?;
                 let one = (|| -> Result<(usize, Option<Report>)> {
                     let mut c = load_for(cover, &out)?;
                     hide_one(&mut c, payload, &spec.pass, &cfg, spec.extra, &out)

@@ -30,6 +30,7 @@ pub fn message(e: &Error) -> String {
         Error::Io(e) => format!("File problem: {e}."),
         Error::Image(e) => format!("Could not read or write the image: {e}."),
         Error::Wav(e) => format!("Could not read or write the audio file: {e}."),
+        Error::Cancelled => "Stopped.".into(),
         Error::Crypto => "Encryption failed unexpectedly.".into(),
     }
 }

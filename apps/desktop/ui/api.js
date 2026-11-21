@@ -11,6 +11,7 @@
     preview: (req) => invoke('preview', { req }),
     views: async (req) => new Uint8Array(await invoke('views', { req })),
     startJob: (job) => invoke('start_job', { job }),
+    cancelJob: () => invoke('cancel_job'),
     textEstimate: (req) => invoke('text_estimate', { req }),
     onJob: (cb) => T.event.listen('job', (e) => cb(e.payload)),
     // Native file windows. Each returns an array of paths ([] when cancelled).

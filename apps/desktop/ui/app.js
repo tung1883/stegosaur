@@ -28,6 +28,7 @@ const ICON = {
   paste: svg('<rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 5V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1"/><path d="M9 12h6M9 16h4"/>'),
   trash: svg('<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/>'),
   play: svg('<path d="M7 4l13 8-13 8z"/>'),
+  stop: svg('<rect x="6" y="6" width="12" height="12" rx="2.5"/>'),
   folderPlus: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>'),
   filePlus: svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 11v6M9 14h6"/>'),
   key: svg('<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9"/><path d="M16 7l3 3"/>'),
@@ -358,7 +359,7 @@ function hidePanel() {
     (h.text ? '<details class="sec" data-sec="txt" ' + secOpen('txt', true) + '><summary>' + CHEV + ICON.text + 'Text cover</summary><div class="kv"><label>Style</label>' + optSelect('style', S.styles.map((s) => [s.id, s.id]), o.style) + (style.adjustable_order ? rng('order', 'Realism', 1, 6, o.order, o.order) : '') + '</div></details>' : '') +
     '<div class="sec"><h4>Check</h4>' + (items.length ? '<div class="kv"><label>Capacity</label><div><div class="fillbar" style="height:7px"><i class="' + (totalNeed > totalCap ? 'bad' : '') + '" style="width:' + Math.max(3, Math.min(100, Math.round((totalNeed / Math.max(totalCap, 1)) * 100))) + '%"></i></div><div class="tiny">' + fmt(totalNeed) + ' of ' + fmt(totalCap) + '</div></div></div>' + (worst != null ? riskBlock(worst) : '<div class="tiny" style="margin-top:8px">' + (S.previewing ? 'Measuring on a copy...' : (items[0] && items[0].note) ? esc(items[0].note) : 'Risk is shown after hiding.') + '</div>') : '<div class="tiny">' + (S.previewing ? 'Measuring on a copy...' : 'Nothing to check yet.') + '</div>') +
     '<div class="issues" style="margin-top:8px">' + (pr.map((x) => '<div class="p">' + ICON.warn + '<span>' + esc(x) + '</span></div>').join('') || (done ? '<div class="k">' + ICON.check + '<span>' + esc(doneText()) + '. New names are in the Risk column.</span></div>' : '<div class="k">' + ICON.check + '<span>' + esc(p.headline || 'Ready') + '</span></div>')) + '</div></div></div>' +
-    '<div class="runbox"><button class="btn big" id="run" data-run ' + (S.busy || pr.length ? 'disabled' : '') + '>' + (S.busy ? '<span class="spin"></span>' + esc(S.progress || 'Working...') : ICON.play + (p.kind === 'text' ? 'Make text' : p.kind === 'split' ? 'Split and hide' : p.kind === 'bulk' ? 'Hide all' : 'Hide')) + '</button></div>';
+    '<div class="runbox">' + (S.busy ? '<div class="progtxt" id="progtxt">' + esc(S.progress || '') + '</div>' : '') + '<button class="btn big' + (S.busy ? ' stop' : '') + '" id="run" data-run ' + ((S.busy ? S.stopping : pr.length) ? 'disabled' : '') + '>' + (S.busy ? (S.stopping ? '<span class="spin"></span>Stopping...' : ICON.stop + 'Stop') : ICON.play + (p.kind === 'text' ? 'Make text' : p.kind === 'split' ? 'Split and hide' : p.kind === 'bulk' ? 'Hide all' : 'Hide')) + '</button></div>';
 }
 
 // ---------------------------------------------------------------- Reveal
@@ -389,7 +390,7 @@ function revealPanel() {
     '<details class="sec" data-sec="rset" ' + secOpen('rset', false) + '><summary>' + CHEV + ICON.sliders + 'Settings<span class="tag">parity ' + o.parity + '</span></summary><div class="kv">' + rng('parity', 'Parity', 0, 64, o.parity, o.parity ? o.parity + ' B' : 'off', 2) + rng('rate', 'Slot size', 2, 30, o.rate, o.rate + '%') + '<label>KDF</label>' + optSelect('kdf', [['standard', 'Standard'], ['strong', 'Strong']], o.kdf) + '</div></details>' +
     (hasText ? '<details class="sec" data-sec="rtxt" ' + secOpen('rtxt', true) + '><summary>' + CHEV + ICON.text + 'Text files<span class="tag">' + o.style + '</span></summary><div class="kv"><label>Style</label>' + optSelect('style', S.styles.map((s) => [s.id, s.id]), o.style) + (style.adjustable_order ? rng('order', 'Realism', 1, 6, o.order, o.order) : '') + '</div></details>' : '') +
     '<div class="sec"><h4>Check</h4><div class="kv"><label>Work</label><div class="tiny">' + r.files.length + ' file(s) x ' + r.passes.length + ' passphrase(s) = ' + r.files.length * r.passes.length + ' tries</div></div><div class="issues" style="margin-top:8px">' + (pr.map((p) => '<div class="p">' + ICON.warn + '<span>' + esc(p) + '</span></div>').join('') || '<div class="k">' + ICON.check + '<span>Ready. A wrong passphrase looks like an empty file.</span></div>') + '</div></div></div>' +
-    '<div class="runbox"><button class="btn big" id="run" data-run ' + (S.busy || pr.length ? 'disabled' : '') + '>' + (S.busy ? '<span class="spin"></span>' + esc(S.progress || 'Working...') : ICON.play + 'Open') + '</button></div>';
+    '<div class="runbox">' + (S.busy ? '<div class="progtxt" id="progtxt">' + esc(S.progress || '') + '</div>' : '') + '<button class="btn big' + (S.busy ? ' stop' : '') + '" id="run" data-run ' + ((S.busy ? S.stopping : pr.length) ? 'disabled' : '') + '>' + (S.busy ? (S.stopping ? '<span class="spin"></span>Stopping...' : ICON.stop + 'Stop') : ICON.play + 'Open') + '</button></div>';
 }
 
 // ---------------------------------------------------------------- Analyze
@@ -471,7 +472,7 @@ function onJob(ev) {
   deliver(w, ev);
 }
 function deliver(w, ev) {
-  if (ev.event === 'step') { S.progress = ev.message; const b = $('#run'); if (b) b.innerHTML = '<span class="spin"></span>' + esc(ev.message); const bar = $('#prog').firstElementChild; bar.style.width = Math.min(90, parseFloat(bar.style.width || '6') + 14) + '%'; return; }
+  if (ev.event === 'step') { S.progress = ev.message; const t = $('#progtxt'); if (t) t.textContent = ev.message; return; }
   waiters.delete(w.id);
   w.resolve(ev);
 }
@@ -486,13 +487,18 @@ async function jobAsync(spec) {
 }
 function setBusy(b) {
   S.busy = b;
-  const pr = $('#prog'), bar = pr.firstElementChild;
-  if (b) { bar.style.transition = 'none'; bar.style.width = '6%'; pr.classList.add('on'); void bar.offsetWidth; bar.style.transition = 'width .5s ease'; }
-  else { bar.style.width = '100%'; setTimeout(() => pr.classList.remove('on'), 250); }
+  if (!b) S.stopping = false;
   render();
 }
 const payloadDto = (f) => (f.typed ? { text: f.text } : { path: f.path });
 function wipe() { const h = S.hide; h.pass = ''; h.confirm = ''; h.confirm2 = ''; if (h.second) h.second.pass = ''; S.reveal.draft = ''; S.reveal.passes = []; }
+
+function stopJob() {
+  if (!S.busy || S.stopping) return;
+  S.stopping = true;
+  render();
+  api.cancelJob().catch(() => {});
+}
 
 async function run() {
   if (S.busy || problems().length) return;
@@ -526,19 +532,21 @@ async function run() {
       const map = {};
       let i = 0;
       for (const f of S.analyze.files) {
+        if (S.stopping) break;
         S.progress = 'Scanning ' + (++i) + ' of ' + S.analyze.files.length + '...';
-        const b = $('#run'); if (b) b.innerHTML = '<span class="spin"></span>' + esc(S.progress);
+        const t = $('#progtxt'); if (t) t.textContent = S.progress;
         const ev = await jobAsync({ kind: 'analyze', image: f.path });
         if (ev.event === 'error') map[f.path] = { error: ev.message };
         else map[f.path] = { score: ev.result.report.score, cls: riskOf(ev.result.report.score)[0] };
         S.result = { tab: 'analyze', map };
         render();
       }
-      celebrate(doneText());
+      if (S.stopping) toast('Stopped', { ms: 2500 }); else celebrate(doneText());
     }
     if (S.tab !== 'analyze') wipe();
   } catch (e) {
-    toast(msgOf(e), { err: true, ms: 7000 });
+    if (S.stopping || /^Stopped\.?$/.test(msgOf(e))) toast('Stopped. Nothing was left half-written.', { ms: 3500 });
+    else toast(msgOf(e), { err: true, ms: 7000 });
   }
   setBusy(false);
 }
@@ -578,7 +586,7 @@ document.addEventListener('click', (e) => {
   if (e.target.closest('.modalb')) return;
   const zone = e.target.closest('[data-zone]'); if (zone && zone.dataset.zone !== 'second') focusZone = zone.dataset.zone;
   if (a) { e.preventDefault(); act(a.dataset.act, a.dataset.arg); return; }
-  if (e.target.closest('[data-run]')) { run(); return; }
+  if (e.target.closest('[data-run]')) { if (S.busy) stopJob(); else run(); return; }
   const row = e.target.closest('tr[data-row]'); if (row) { sel = { list: row.dataset.rk, i: +row.dataset.row }; render(); return; }
   if (e.target.closest('[data-showpass]')) { showPass = !showPass; render(); return; }
   const sz = e.target.closest('[data-sortz]'); if (sz) { const k = sz.dataset.sortz; sortBy[k] = !sortBy[k] ? 'name' : sortBy[k] === 'name' ? 'size' : ''; render(); return; }
