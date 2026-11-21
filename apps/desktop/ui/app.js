@@ -50,7 +50,7 @@ const S = {
   hide: { payloads: [], covers: [], text: false, message: '', second: null, same: false, pass: '', confirm: '', confirm2: '', k: 2, layout: 'auto' },
   reveal: { files: [], passes: [], draft: '' },
   analyze: { files: [] },
-  opts: { mode: 'match', parity: 16, rate: 10, kdf: 'standard', naming: 'keyed', pattern: '{name}_{n}', outDir: '', overwrite: false, style: 'syslog', order: 4, recursive: false, namesOnly: false },
+  opts: { mode: 'match', parity: 16, rate: 10, kdf: 'standard', naming: 'keyed', pattern: '{name}_{n}', outDir: '', overwrite: false, extra: true, style: 'syslog', order: 4, recursive: false, namesOnly: false },
   styles: [],
   prev: null, prevError: null, previewing: false,
   result: null, busy: false, progress: '',
@@ -167,10 +167,9 @@ function plan() {
     if (!M) out.problems.push('Choose where to hide it.');
     if (N === 1 && M === 1) out.kind = h.second ? 'two' : h.same ? 'same' : 'single';
     else if (N === 1 && M > 1) out.kind = 'split';
-    else if (N > 1 && M >= N) out.kind = 'bulk';
-    else if (N > 1 && M >= 1) out.problems.push(N + ' files need ' + N + ' covers. You chose ' + M + '. Add ' + (N - M) + ' more cover(s).');
-    out.headline = { single: 'Hides one file in one cover.', same: 'Hides one file. The cover looks the same whether it holds one secret, two or none.', two: 'Hide two files in one cover', split: 'Hide data in many pieces', bulk: 'Hides each of the ' + N + ' files in its own cover, in the order shown.' }[out.kind] || '';
-    const want = { split: [N === 1 && M > 1, 'needs 1 file and 2 or more covers'], bulk: [N > 1 && M >= N, 'needs 2 or more files and at least as many covers'] }[h.layout];
+    else if (N > 1 && M >= 1) out.kind = 'bulk';
+    out.headline = { single: 'Hides one file in one cover.', same: 'Hides one file. The cover looks the same whether it holds one secret, two or none.', two: 'Hide two files in one cover', split: 'Hide data in many pieces', bulk: M >= N ? 'Hides each of the ' + N + ' files in its own cover, in the order shown.' : M === 1 ? 'Hides each of the ' + N + ' files in its own copy of the cover.' : 'Hides the ' + N + ' files in turn in the ' + M + ' covers. Each cover is copied as often as needed.' }[out.kind] || '';
+    const want = { split: [N === 1 && M > 1, 'needs 1 file and 2 or more covers'], bulk: [N > 1 && M >= 1, 'needs 2 or more files and at least one cover'] }[h.layout];
     if (want && !want[0] && N && M) out.problems.unshift('Layout "' + h.layout + '" ' + want[1] + ' (you have ' + N + ' file(s), ' + M + ' cover(s)).');
     if (h.second && !h.second.file) out.problems.push('Choose the second file.');
   }
@@ -181,7 +180,7 @@ function plan() {
     else if (h.second.pass !== h.confirm2) out.problems.push(h.confirm2 ? 'The second passphrase boxes do not match.' : 'Type the second passphrase again to confirm it.');
     else if (h.second.pass === h.pass) out.problems.push('The two passphrases must differ.');
   }
-  if (S.prev && S.prev.items) for (const it of S.prev.items) if (it.error) { out.problems.push(it.error); break; } else if (it.fits === false) { out.problems.push('A file is too big for its cover.'); break; }
+  if (S.prev && S.prev.items) for (const it of S.prev.items) if (it.fits === false && (out.kind === 'single' || out.kind === 'bulk')) { out.problems.push(S.opts.extra ? 'A file is too big for its cover, and this kind of cover cannot take extra room. Use a PNG, BMP or WAV, or a bigger one.' : 'A file is too big for its cover. Turn on extra room under Output.'); break; } else if (it.error) { out.problems.push(it.error); break; } else if (it.fits === false) { out.problems.push('A file is too big for its cover.'); break; }
   if (S.prevError) out.problems.push(S.prevError);
   return out;
 }
@@ -203,8 +202,10 @@ async function doPreview() {
   try {
     let items = [];
     if (p.kind === 'single') {
-      const r = await api.preview({ op: 'embed', carrier: h.covers[0].path, payload_len: h.payloads[0].size, ...base, measure: true });
-      items = [{ cap: r.capacity, fits: r.fits, fill: r.fill, score: r.measured ? r.measured.after.score : null, note: r.detect_note, error: r.error }];
+      let r = await api.preview({ op: 'embed', carrier: h.covers[0].path, payload_len: h.payloads[0].size, ...base, measure: true });
+      const extra = extraNeeded(o, h.covers[0].path, h.payloads[0].size, r);
+      if (extra) r = await api.preview({ op: 'embed', carrier: h.covers[0].path, payload_len: r.capacity, ...base, measure: true });
+      items = [{ cap: r.capacity, fits: r.fits || !!extra, fill: extra ? 1 : r.fill, extra, score: r.measured ? r.measured.after.score : null, note: r.detect_note, error: r.error }];
     } else if (p.kind === 'same' || p.kind === 'two') {
       const r = await api.preview({ op: 'hidden', carrier: h.covers[0].path, payload_len: h.payloads[0].size, hidden_len: p.kind === 'two' && h.second.file ? h.second.file.size : null, ...base, measure: true });
       const big = Math.max(h.payloads[0].size, p.kind === 'two' && h.second.file ? h.second.file.size : 0);
@@ -215,10 +216,15 @@ async function doPreview() {
       items = (r.split ? r.split.carriers : []).map((c) => ({ cap: c.capacity, fits: c.fits, fill: c.capacity ? Math.min(1, sl / c.capacity) : 1 }));
       if (r.error) items.length && (items[0].error = r.error);
     } else {
-      for (let i = 0; i < h.payloads.length; i++) {
-        const r = await api.preview({ op: 'embed', carrier: h.covers[i].path, payload_len: h.payloads[i].size, ...base, measure: false });
+      const M = h.covers.length;
+      const biggest = h.covers.map((_, c) => h.payloads.reduce((m, f, j) => (j % M === c && (m < 0 || f.size > h.payloads[m].size) ? j : m), -1));
+      for (let c = 0; c < M; c++) {
+        const i = biggest[c];
+        if (i < 0) { items.push({ cap: 0, fits: true, fill: 0, unused: true }); continue; }
+        const r = await api.preview({ op: 'embed', carrier: h.covers[c].path, payload_len: h.payloads[i].size, ...base, measure: false });
         if (seq !== prevSeq) return;
-        items.push({ cap: r.capacity, fits: r.fits, fill: r.fill, score: null, error: r.error });
+        const extra = extraNeeded(o, h.covers[c].path, h.payloads[i].size, r);
+        items.push({ cap: r.capacity, fits: r.fits || !!extra, fill: extra ? 1 : r.fill, extra, score: null, error: extra ? null : r.error });
       }
     }
     if (seq !== prevSeq) return;
@@ -229,6 +235,11 @@ async function doPreview() {
   }
   S.previewing = false;
   render();
+}
+// How many bytes would go into the extra block, or 0 when the cover holds it all (or extra room is off or not possible).
+function extraNeeded(o, path, size, r) {
+  if (!o.extra || r.fits || !r.capacity) return 0;
+  return /\.(png|bmp|wav)$/i.test(path) ? Math.max(0, size - r.capacity) : 0;
 }
 function changed() { if (S.tab === 'hide') { S.prev = null; schedulePreview(); } render(); }
 
@@ -257,13 +268,20 @@ const segBtn = (cur, val, act, arg, label, title) => '<button class="' + (cur ==
 const optSelect = (name, list, cur) => '<select class="in" data-opt="' + name + '">' + list.map(([v, l]) => '<option value="' + esc(v) + '" ' + (cur === v ? 'selected' : '') + '>' + esc(l) + '</option>').join('') + '</select>';
 
 function zoneShell(key, title, files, toolbar, body, cntText) {
-  return '<section class="zone ' + (focusZone === key ? 'focus' : '') + '" data-zone="' + key + '" tabindex="0"><header><h3>' + title + '</h3><span class="cnt">' + (cntText != null ? cntText : files.length + ' item' + (files.length === 1 ? '' : 's') + (files.length && typeof files[0] !== 'string' ? ', ' + sizeSum(files) : '')) + '</span><span class="sp"></span>' + toolbar + '</header><div class="zb">' + body + '</div></section>';
+  return '<section class="zone ' + (focusZone === key ? 'focus' : '') + '" data-zone="' + key + '" tabindex="0"><header><h3>' + title + '</h3><span class="cnt" title="' + esc(cntText != null ? cntText : files.length + ' item' + (files.length === 1 ? '' : 's') + (files.length && typeof files[0] !== 'string' ? ', ' + sizeSum(files) : '')) + '">' + (cntText != null ? cntText.split(',')[0] : files.length) + '</span><span class="tools">' + toolbar + '</span></header><div class="zb">' + body + '</div></section>';
 }
 const emptyBody = (msg, add, dir, paste, extra) => '<div class="dropmsg"><div class="big">' + ICON.download + '</div><div>' + msg + '</div><div class="row2"><button class="tbtn pri" data-act="' + add + '" title="Add files" aria-label="Add files">' + ICON.filePlus + '</button><button class="tbtn" data-act="' + dir + '" title="Add a folder" aria-label="Add a folder">' + ICON.folderPlus + '</button><button class="tbtn" data-act="' + paste + '" title="Paste paths" aria-label="Paste paths">' + ICON.paste + '</button>' + (extra || '') + '</div></div>';
 const typeBtn = () => '<button class="tbtn ' + (typing ? 'pri' : '') + '" data-typetext title="Type a short message to hide, no file needed" aria-label="Type text">' + ICON.text + '</button>';
 const listToolbar = (key, add, dir, paste, files, extra) => tb('filePlus', 'Add', add, 'Add files') + tb('folderPlus', 'Folder', dir, 'Add a whole folder') + tb('paste', 'Paste', paste, 'Paste a list of paths') + (extra || '') + (files.length > 1 ? '<button class="tbtn ' + (sortBy[key] ? 'pri' : '') + '" data-sortz="' + key + '" title="Sort: ' + (sortBy[key] || 'as added') + ' (click to change)" aria-label="Sort">' + ICON.sort + '</button>' : '') + (files.length ? '<button class="tbtn" data-act="clearList" data-arg="' + key + '" title="Remove all">' + ICON.trash + '</button>' : '');
 const rowOps = (key, i) => ib('arrowUp', 'move', key + ':' + i + ':-1', 'Move up') + ib('arrowDown', 'move', key + ':' + i + ':1', 'Move down') + ib('close', 'dropList', key + ':' + i, 'Remove', 'del');
 const rowAttrs = (key, i) => 'data-row="' + i + '" data-rk="' + key + '" class="' + (sel.list === key && sel.i === i ? 'sel' : '') + '"';
+function nameHTML(name) {
+  const i = name.lastIndexOf('.');
+  const ext = i > 0 && name.length - i <= 8 ? name.slice(i) : '';
+  const base = ext ? name.slice(0, i) : name;
+  return '<span class="nb">' + esc(base) + '</span>' + (ext ? '<span class="ne">' + esc(ext) + '</span>' : '');
+}
+const nameCell = (f) => '<span class="nmw">' + icFor(f) + '<span class="nt">' + nameHTML(f.name) + '</span></span>';
 const icFor = (f) => '<span class="ic k-' + f.kind + '">' + (ICON[f.kind] || ICON.other) + '</span>';
 function sorted(key, files) {
   const arr = files.map((f, i) => ({ f, i })), s = sortBy[key];
@@ -281,16 +299,19 @@ function hideZones() {
   const left = h.text
     ? zoneShell('payloads', 'Hide', [], '', '<div style="padding:10px"><label class="l">Message to hide</label><textarea class="in" id="msg" data-bind="hide.message" style="height:150px" placeholder="Type the message to hide">' + esc(h.message) + '</textarea><div class="tiny" style="margin-top:4px">' + bytesOf(h.message) + ' bytes</div></div>', bytesOf(h.message) + ' bytes')
     : zoneShell('payloads', 'Hide', h.payloads, listToolbar('payloads', 'addPayload', 'addPayloadDir', 'pastePayload', h.payloads, typeBtn()),
-      typedEditor() + (h.payloads.length ? '<table><thead><tr><th></th><th>#</th><th>File</th><th>Size</th><th></th></tr></thead><tbody>' + sorted('payloads', h.payloads).map(({ f, i }) => '<tr ' + rowAttrs('payloads', i) + '><td class="grip">' + ICON.grip + '</td><td class="dim">' + (i + 1) + '</td><td class="nm" title="' + esc(f.path) + '">' + icFor(f) + ' ' + esc(f.name) + '</td><td class="dim">' + fmt(f.size) + '</td><td class="act">' + rowOps('payloads', i) + '</td></tr>').join('') + '</tbody></table>' : (typing ? '' : emptyBody('Drop the stuff to hide here', 'addPayload', 'addPayloadDir', 'pastePayload', typeBtn()))));
+      typedEditor() + (h.payloads.length ? '<table><thead><tr><th class="c-idx">#</th><th>File</th><th class="c-size">Size</th><th class="c-act"></th></tr></thead><tbody>' + sorted('payloads', h.payloads).map(({ f, i }) => '<tr ' + rowAttrs('payloads', i) + '><td class="dim">' + (i + 1) + '</td><td class="nm" title="' + esc(f.path) + '">' + nameCell(f) + '</td><td class="dim">' + fmt(f.size) + '</td><td class="act">' + rowOps('payloads', i) + '</td></tr>').join('') + '</tbody></table>' : (typing ? '' : emptyBody('Drop the stuff to hide here', 'addPayload', 'addPayloadDir', 'pastePayload', typeBtn()))));
   const gen = S.result && S.result.tab === 'hide' && S.result.text != null ? S.result.text : null;
   let right;
   if (h.text && gen != null) right = zoneShell('covers', 'Cover text', [], '<button class="tbtn" data-copytext title="Copy the text" aria-label="Copy">' + ICON.copy + '</button><button class="tbtn pri" data-savetext title="Save as a .txt file" aria-label="Save">' + ICON.download + '</button>', '<div class="textout">' + esc(gen) + '</div>', gen.split('\n').length + ' lines, ' + gen.split(/\s+/).filter(Boolean).length + ' words');
   else if (h.text) right = zoneShell('covers', 'Cover', [], '', '<div class="dropmsg"><div class="big">' + ICON.text + '</div><div>Generated text is the cover.<br>Style and realism are in the panel.</div></div>');
   else right = zoneShell('covers', 'Cover(s)', h.covers, listToolbar('covers', 'addCover', 'addCoverDir', 'pasteCover', h.covers),
-    h.covers.length ? '<table><thead><tr><th></th><th>#</th><th>Cover</th><th>Holds</th><th>Fill</th><th>' + (res ? 'Saved as' : 'Risk') + '</th><th></th></tr></thead><tbody>' + sorted('covers', h.covers).map(({ f, i }) => {
-      const it = items[i], rr = res && (split ? res[i] : p.kind === 'bulk' ? res[i] : res[0]);
-      const showRes = rr && (rr.output || rr.error);
-      return '<tr ' + rowAttrs('covers', i) + '><td class="grip">' + ICON.grip + '</td><td class="dim">' + (i + 1) + '</td><td class="nm" title="' + esc(f.path) + '">' + icFor(f) + ' ' + esc(f.name) + '</td><td class="dim">' + (it ? fmt(it.cap) : '') + '</td><td style="min-width:70px">' + (it ? '<div class="fillbar" title="' + Math.round(it.fill * 100) + '%"><i class="' + (it.fits ? '' : 'bad') + '" style="width:' + Math.max(3, Math.round(it.fill * 100)) + '%"></i></div>' : '') + '</td><td>' + (showRes ? (rr.error ? '<span class="tiny" style="color:var(--red)" title="' + esc(rr.error) + '">' + esc(rr.error.slice(0, 34)) + '</span>' : '<span class="mono ok">' + esc(baseName(rr.output)) + '</span>') : it && it.score != null ? '<span class="rk ' + riskOf(it.score)[0] + '">' + Math.round(it.score) + '</span>' : it && it.fits === false ? '<span class="tiny">too big</span>' : '') + '</td><td class="act">' + rowOps('covers', i) + '</td></tr>';
+    h.covers.length ? '<table><thead><tr><th class="c-idx">#</th><th>Cover</th>' + (res ? '<th class="c-res2">Saved as</th>' : '<th class="c-fill">Room</th>') + '<th class="c-act"></th></tr></thead><tbody>' + (p.kind === 'bulk' && h.covers.length < h.payloads.length && res ? res.map((_, j) => ({ f: h.covers[j % h.covers.length], i: j % h.covers.length, j })) : sorted('covers', h.covers)).map(({ f, i, j }) => {
+      const it = items[i], rr = res && (j != null ? res[j] : split ? res[i] : p.kind === 'bulk' ? res[i] : res[0]);
+      const badge = (s) => '<span class="rk ' + riskOf(s)[0] + '">' + Math.round(s) + '</span>';
+      const head = '<tr ' + rowAttrs('covers', i) + '><td class="dim">' + (i + 1) + '</td><td class="nm" title="' + esc(f.path) + '">' + nameCell(f) + '</td>';
+      const tail = '<td class="act">' + rowOps('covers', i) + '</td></tr>';
+      if (res) return head + '<td><div class="rescell">' + (rr ? (rr.error ? '<span class="tiny" style="color:var(--red)" title="' + esc(rr.error) + '">' + esc(rr.error) + '</span>' : '<span class="mono ok rn" title="' + esc(rr.output) + '">' + esc(baseName(rr.output)) + '</span>' + (rr.report ? badge(rr.report.score) : '')) : '') + '</div></td>' + tail;
+      return head + '<td>' + (it && !it.unused ? '<div class="holds" title="' + (it.extra ? 'Room for ' + fmt(it.cap) + ' inside the file, plus ' + fmt(it.extra) + ' extra at the end of it' : it.fits ? 'Room for ' + fmt(it.cap) + ' of hidden data' : 'Only room for ' + fmt(it.cap) + ', not enough for what you are hiding') + '"><span class="' + (it.fits ? 'dim' : 'bad') + '">' + fmt(it.cap) + (it.extra ? ' <span class="xtra">+ ' + fmt(it.extra) + '</span>' : it.fits ? '' : ', too small') + '</span>' + (it.extra ? '<div class="fillbar two"><i style="width:' + Math.max(3, Math.round(it.cap / (it.cap + it.extra) * 100)) + '%"></i><i class="x" style="width:' + Math.round(it.extra / (it.cap + it.extra) * 100) + '%"></i></div>' : '<div class="fillbar" title="' + Math.round(it.fill * 100) + '% full"><i class="' + (it.fits ? '' : 'bad') + '" style="width:' + Math.max(3, Math.round(it.fill * 100)) + '%"></i></div>') + '</div>' : '') + '</td>' + tail;
     }).join('') + '</tbody></table>' : emptyBody('Choose images or audio as the cover', 'addCover', 'addCoverDir', 'pasteCover'));
   return [left, right];
 }
@@ -308,8 +329,8 @@ function hidePanel() {
   let p = plan();
   if (h.second && !['single', 'two', 'same'].includes(p.kind) && !h.text) { h.second = null; p = plan(); }
   const pr = p.problems, items = (S.prev && S.prev.items) || [];
-  const totalNeed = p.kind === 'split' ? 0 : items.length ? h.payloads.slice(0, items.length).reduce((a, f) => a + f.size, 0) : 0;
-  const totalCap = items.reduce((a, i) => a + i.cap, 0);
+  const totalNeed = p.kind === 'split' ? 0 : p.kind === 'bulk' ? h.covers.reduce((a, _, c) => a + Math.max(0, ...h.payloads.filter((__, j) => j % h.covers.length === c).map((f) => f.size)), 0) : items.length ? h.payloads.slice(0, items.length).reduce((a, f) => a + f.size, 0) : 0;
+  const totalCap = items.reduce((a, i) => a + i.cap + (i.extra || 0), 0);
   const worst = items.some((i) => i.score != null) ? Math.max(...items.filter((i) => i.score != null).map((i) => i.score)) : null;
   const layoutDesc = { split: 'Hide data in many pieces', bulk: 'Many files. Each one goes into its own cover.' }[h.layout] || (p.headline || 'Picks the layout from what you chose.');
   const head = h.layout === 'auto' ? (p.kind ? 'Layout: ' + layoutLabel(p.kind) : 'Layout') : 'Layout';
@@ -332,6 +353,7 @@ function hidePanel() {
     '<label>File name</label>' + optSelect('naming', [['keyed', 'Ordinary name'], ['suffix', 'Cover name + _1'], ['custom', 'Custom pattern']], o.naming) +
     (o.naming === 'custom' ? '<label>Pattern</label><input class="in" data-opt="pattern" value="' + esc(o.pattern) + '">' : '') +
     '<label>Save in</label><div class="pwrow"><input class="in" data-opt="outDir" value="' + esc(o.outDir) + '" placeholder="next to each cover"><button data-browse title="Choose a folder">' + ICON.folderPlus + '</button></div>' +
+    (['single', 'bulk'].includes(p.kind) ? '<label>Extra room</label><label class="chk"><input type="checkbox" data-opt="extra" ' + (o.extra ? 'checked' : '') + '> use when the cover is too small</label>' : '') +
     '<label>Overwrite</label><label class="chk"><input type="checkbox" data-opt="overwrite" ' + (o.overwrite ? 'checked' : '') + '> allow (never the inputs)</label></div></details>' +
     (h.text ? '<details class="sec" data-sec="txt" ' + secOpen('txt', true) + '><summary>' + CHEV + ICON.text + 'Text cover</summary><div class="kv"><label>Style</label>' + optSelect('style', S.styles.map((s) => [s.id, s.id]), o.style) + (style.adjustable_order ? rng('order', 'Realism', 1, 6, o.order, o.order) : '') + '</div></details>' : '') +
     '<div class="sec"><h4>Check</h4>' + (items.length ? '<div class="kv"><label>Capacity</label><div><div class="fillbar" style="height:7px"><i class="' + (totalNeed > totalCap ? 'bad' : '') + '" style="width:' + Math.max(3, Math.min(100, Math.round((totalNeed / Math.max(totalCap, 1)) * 100))) + '%"></i></div><div class="tiny">' + fmt(totalNeed) + ' of ' + fmt(totalCap) + '</div></div></div>' + (worst != null ? riskBlock(worst) : '<div class="tiny" style="margin-top:8px">' + (S.previewing ? 'Measuring on a copy...' : (items[0] && items[0].note) ? esc(items[0].note) : 'Risk is shown after hiding.') + '</div>') : '<div class="tiny">' + (S.previewing ? 'Measuring on a copy...' : 'Nothing to check yet.') + '</div>') +
@@ -343,14 +365,18 @@ function hidePanel() {
 function revealZones() {
   const r = S.reveal, by = {};
   if (S.result && S.result.tab === 'reveal') S.result.items.forEach((x) => { (by[x.name] = by[x.name] || []).push(x); });
-  const setRows = S.result && S.result.tab === 'reveal' ? S.result.sets.map((x) => '<tr><td></td><td></td><td class="nm"><b>split ' + esc(x.set) + '</b></td><td class="dim">' + (x.output ? 'rebuilt' : 'short') + '</td><td><span class="rk ' + (x.output ? 'low' : 'mid') + '">' + (x.output ? 'split set' : 'needs ' + x.missing + ' more') + '</span></td><td class="mono ok">' + (x.output ? esc(baseName(x.output)) : '') + '</td><td></td></tr>').join('') : '';
+  const hasRes = !!(S.result && S.result.tab === 'reveal');
+  const setRows = hasRes ? S.result.sets.map((x) => '<tr><td></td><td class="nm"><b>split ' + esc(x.set) + '</b></td><td><span class="rk ' + (x.output ? 'low' : 'mid') + '">' + (x.output ? 'rebuilt' : 'needs ' + x.missing) + '</span></td><td class="mono ok">' + (x.output ? esc(baseName(x.output)) : '') + '</td><td></td></tr>').join('') : '';
   const files = zoneShell('reveal', 'Reveal', r.files, listToolbar('reveal', 'addReveal', 'addRevealDir', 'pasteReveal', r.files),
-    r.files.length ? '<table><thead><tr><th></th><th>#</th><th>File</th><th>Size</th><th>Result</th><th>Saved as</th><th></th></tr></thead><tbody>' + sorted('reveal', r.files).map(({ f, i }) => {
+    r.files.length ? '<table><thead><tr><th class="c-idx">#</th><th>File</th>' + (hasRes ? '<th class="c-state">Result</th><th class="c-res">Saved as</th>' : '<th class="c-size">Size</th>') + '<th class="c-act"></th></tr></thead><tbody>' + sorted('reveal', r.files).map(({ f, i }) => {
       const rs = by[f.name] || [], x = rs[0];
-      return '<tr ' + rowAttrs('reveal', i) + '><td class="grip">' + ICON.grip + '</td><td class="dim">' + (i + 1) + '</td><td class="nm" title="' + esc(f.path) + '">' + icFor(f) + ' ' + esc(f.name) + '</td><td class="dim">' + fmt(f.size) + '</td><td>' + (x ? '<span class="rk ' + (x.status === 'file' ? 'low' : x.status === 'share' ? 'mid' : '') + '">' + (x.status === 'file' ? (rs.length > 1 ? rs.length + ' found' : 'found') : x.status === 'share' ? 'share' : x.status === 'skipped' ? 'skipped' : 'nothing') + '</span>' : '') + '</td><td class="mono ok">' + rs.filter((y) => y.output).map((y) => esc(baseName(y.output))).join('<br>') + '</td><td class="act">' + rowOps('reveal', i) + '</td></tr>';
+      const head = '<tr ' + rowAttrs('reveal', i) + '><td class="dim">' + (i + 1) + '</td><td class="nm" title="' + esc(f.path) + ' (' + fmt(f.size) + ')">' + nameCell(f) + '</td>';
+      const tail = '<td class="act">' + rowOps('reveal', i) + '</td></tr>';
+      if (!hasRes) return head + '<td class="dim">' + fmt(f.size) + '</td>' + tail;
+      return head + '<td>' + (x ? '<span class="rk ' + (x.status === 'file' ? 'low' : x.status === 'share' ? 'mid' : '') + '">' + (x.status === 'file' ? (rs.length > 1 ? rs.length + ' found' : 'found') : x.status === 'share' ? 'share' : x.status === 'skipped' ? 'skipped' : 'nothing') + '</span>' : '') + '</td><td class="mono ok">' + rs.filter((y) => y.output).map((y) => esc(baseName(y.output))).join('<br>') + '</td>' + tail;
     }).join('') + setRows + '</tbody></table>' : emptyBody('Drop the files or folders to open here.', 'addReveal', 'addRevealDir', 'pasteReveal'));
   const pwz = zoneShell('passes', 'Passphrases', r.passes, '<button class="tbtn" data-showpass title="' + (showPass ? 'Hide' : 'Show') + ' the passphrases" aria-label="Show or hide">' + (showPass ? ICON.eyeOff : ICON.eye) + '</button><button class="tbtn" data-passpaste title="Paste a list of passphrases" aria-label="Paste list">' + ICON.paste + '</button>' + (r.passes.length ? '<button class="tbtn" data-act="clearPasses">' + ICON.trash + '</button>' : ''),
-    '<table><thead><tr><th>#</th><th>Passphrase</th><th></th></tr></thead><tbody>' + r.passes.map((p, i) => '<tr><td class="dim">' + (i + 1) + '</td><td class="mono"><span class="ic">' + ICON.key + '</span> ' + (showPass ? esc(p) : stars(p)) + '</td><td class="act">' + ib('close', 'removePass', i, 'Remove', 'del') + '</td></tr>').join('') + (!r.passes.length ? '<tr><td></td><td class="dim">Add every passphrase you might have used.</td><td></td></tr>' : '') + '</tbody></table><div style="padding:8px 10px"><div class="pwrow"><input class="in" id="draft" type="' + (showPass ? 'text' : 'password') + '" data-bind="reveal.draft" data-enter="addPass" value="' + esc(r.draft) + '" placeholder="type a passphrase and press Enter"><button data-act="addPass" title="Add">' + ICON.plus + '</button></div><div class="tiny" style="margin-top:6px">Every passphrase is tried on every file.</div></div>');
+    '<table><thead><tr><th class="c-idx">#</th><th>Passphrase</th><th class="c-act1"></th></tr></thead><tbody>' + r.passes.map((p, i) => '<tr><td class="dim">' + (i + 1) + '</td><td class="mono"><span class="ic">' + ICON.key + '</span> ' + (showPass ? esc(p) : stars(p)) + '</td><td class="act">' + ib('close', 'removePass', i, 'Remove', 'del') + '</td></tr>').join('') + (!r.passes.length ? '<tr><td></td><td class="dim">Add every passphrase you might have used.</td><td></td></tr>' : '') + '</tbody></table><div style="padding:8px 10px"><div class="pwrow"><input class="in" id="draft" type="' + (showPass ? 'text' : 'password') + '" data-bind="reveal.draft" data-enter="addPass" value="' + esc(r.draft) + '" placeholder="type a passphrase and press Enter"><button data-act="addPass" title="Add">' + ICON.plus + '</button></div><div class="tiny" style="margin-top:6px">Every passphrase is tried on every file.</div></div>');
   return [files, pwz];
 }
 function revealPanel() {
@@ -371,9 +397,9 @@ function analyzeZones() {
   const a = S.analyze, res = S.result && S.result.tab === 'analyze' ? S.result.map : {};
   const rows = sortBy.score ? a.files.map((f, i) => ({ f, i })).sort((x, y) => ((res[y.f.path] || { score: -1 }).score) - ((res[x.f.path] || { score: -1 }).score)) : sorted('analyze', a.files);
   return [zoneShell('analyze', 'Images to scan', a.files, listToolbar('analyze', 'addAnalyze', 'addAnalyzeDir', 'pasteAnalyze', a.files) + '<button class="tbtn ' + (sortBy.score ? 'pri' : '') + '" data-sortscore title="Sort by score" aria-label="Sort by score">' + ICON.gauge + '</button>',
-    a.files.length ? '<table><thead><tr><th></th><th>#</th><th>Image</th><th>Size</th><th>Score</th><th style="width:34%">How easy to spot</th><th></th></tr></thead><tbody>' + rows.map(({ f, i }) => {
+    a.files.length ? '<table><thead><tr><th class="c-idx">#</th><th>Image</th><th class="c-size">Size</th><th class="c-state">Score</th><th class="c-gauge">How easy to spot</th><th class="c-act"></th></tr></thead><tbody>' + rows.map(({ f, i }) => {
       const r = res[f.path];
-      return '<tr ' + rowAttrs('analyze', i) + '><td class="grip">' + ICON.grip + '</td><td class="dim">' + (i + 1) + '</td><td class="nm" title="' + esc(f.path) + '">' + icFor(f) + ' ' + esc(f.name) + '</td><td class="dim">' + esc(f.summary || '') + '</td><td>' + (r && r.score != null ? '<span class="rk ' + r.cls + '">' + Math.round(r.score) + '</span>' : r && r.error ? '<span class="tiny" style="color:var(--red)" title="' + esc(r.error) + '">n/a</span>' : '') + '</td><td>' + (r && r.score != null ? gaugeBar(r.score) : r && r.error ? '<span class="tiny">' + esc(r.error.slice(0, 60)) + '</span>' : '') + '</td><td class="act">' + rowOps('analyze', i) + '</td></tr>';
+      return '<tr ' + rowAttrs('analyze', i) + '><td class="dim">' + (i + 1) + '</td><td class="nm" title="' + esc(f.path) + '">' + nameCell(f) + '</td><td class="dim">' + esc(f.summary || '') + '</td><td>' + (r && r.score != null ? '<span class="rk ' + r.cls + '">' + Math.round(r.score) + '</span>' : r && r.error ? '<span class="tiny" style="color:var(--red)" title="' + esc(r.error) + '">n/a</span>' : '') + '</td><td>' + (r && r.score != null ? gaugeBar(r.score) : r && r.error ? '<span class="tiny">' + esc(r.error.slice(0, 60)) + '</span>' : '') + '</td><td class="act">' + rowOps('analyze', i) + '</td></tr>';
     }).join('') + '</tbody></table>' : emptyBody('Drop the images to scan here.', 'addAnalyze', 'addAnalyzeDir', 'pasteAnalyze')), ''];
 }
 function analyzePanel() {
@@ -482,7 +508,7 @@ async function run() {
         if (ev.event === 'error') throw ev.message;
         S.result = { tab: 'hide', layout: 'text', text: ev.result.text, words: ev.result.words, items: [] };
       } else {
-        const ev = await jobAsync({ kind: 'hide', layout: p.kind, payloads: h.payloads.map(payloadDto), covers: h.covers.map((c) => c.path), second: h.second && h.second.file ? payloadDto(h.second.file) : null, pass: h.pass, pass2: h.second ? h.second.pass : null, k: Math.min(h.k, h.covers.length), naming: { keyed: 'ordinary', suffix: 'suffix', custom: 'pattern' }[o.naming], pattern: o.pattern, out_dir: o.outDir || null, mode: o.mode, parity: o.parity, rate: o.rate / 100, kdf: o.kdf, overwrite: o.overwrite });
+        const ev = await jobAsync({ kind: 'hide', layout: p.kind, payloads: h.payloads.map(payloadDto), covers: h.covers.map((c) => c.path), second: h.second && h.second.file ? payloadDto(h.second.file) : null, pass: h.pass, pass2: h.second ? h.second.pass : null, k: Math.min(h.k, h.covers.length), naming: { keyed: 'ordinary', suffix: 'suffix', custom: 'pattern' }[o.naming], pattern: o.pattern, out_dir: o.outDir || null, mode: o.mode, parity: o.parity, rate: o.rate / 100, kdf: o.kdf, overwrite: o.overwrite, extra: o.extra });
         if (ev.event === 'error') throw ev.message;
         S.result = { tab: 'hide', layout: ev.result.layout, items: ev.result.items };
       }
@@ -561,7 +587,7 @@ document.addEventListener('click', (e) => {
   if (e.target.closest('[data-typetext]')) { typing = !typing; render(); const t = $('#typed'); if (t) t.focus(); return; }
   if (e.target.closest('[data-typecancel]')) { typing = false; typedDraft = ''; render(); return; }
   if (e.target.closest('[data-typeadd]')) {
-    if (typedDraft.trim()) { const bytes = bytesOf(typedDraft); S.hide.payloads.push({ typed: true, text: typedDraft, name: 'Typed message ' + (++typedCount) + ' (' + bytes + ' B)', kind: 'text', size: bytes, path: 'typed:' + typedCount }); S.result = null; }
+    if (typedDraft.trim()) { const bytes = bytesOf(typedDraft); S.hide.payloads.push({ typed: true, text: typedDraft, name: 'Typed message ' + (++typedCount), kind: 'text', size: bytes, path: 'typed:' + typedCount }); S.result = null; }
     typing = false; typedDraft = ''; changed(); return;
   }
   if (e.target.closest('[data-browse]')) { api.pickFolders('Choose the folder to save in').then((p) => { if (p.length) { S.opts.outDir = p[0]; render(); } }); return; }
@@ -638,5 +664,5 @@ async function init() {
   render();
   setTimeout(() => $('#app').classList.add('ready'), 1200);
 }
-window.StegoUI = { S, act, setSecond: async (p) => { const en = await api.describe([p], 'any', false); S.hide.second.file = toItem(en[0]); changed(); }, render, run, plan, problems, addPaths, dropOn, doPreview, schedulePreview, wipe, riskOf, setTyped: (t) => { S.hide.payloads.push({ typed: true, text: t, name: 'Typed message ' + (++typedCount) + ' (' + bytesOf(t) + ' B)', kind: 'text', size: bytesOf(t), path: 'typed:' + typedCount }); changed(); } };
+window.StegoUI = { S, act, setSecond: async (p) => { const en = await api.describe([p], 'any', false); S.hide.second.file = toItem(en[0]); changed(); }, render, run, plan, problems, addPaths, dropOn, doPreview, schedulePreview, wipe, riskOf, setTyped: (t) => { S.hide.payloads.push({ typed: true, text: t, name: 'Typed message ' + (++typedCount), kind: 'text', size: bytesOf(t), path: 'typed:' + typedCount }); changed(); } };
 init().catch((e) => { document.body.insertAdjacentHTML('afterbegin', '<pre style="color:#b00;padding:12px">Start-up failed: ' + esc(msgOf(e)) + '</pre>'); });
