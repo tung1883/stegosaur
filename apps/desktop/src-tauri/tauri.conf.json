@@ -13,10 +13,11 @@
         "title": "Stegosaur",
         "decorations": false,
         "transparent": true,
+        "maximizable": false,
         "shadow": false,
         "center": true,
-        "width": 1280,
-        "height": 860,
+        "width": 1000,
+        "height": 720,
         "minWidth": 1000,
         "minHeight": 720
       }
