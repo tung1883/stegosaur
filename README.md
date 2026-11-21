@@ -40,7 +40,7 @@ All four programs use the same code. A file made by one program opens in the oth
 - **Split and join.** Split one secret into N shares. Hide each share in a different cover. Any K shares rebuild the secret. Fewer than K shares give no information.
 - **Cover text.** Turn a secret into text that reads like a log file or other plain English-like text.
 - **Bulk recovery.** Give Stegosaur a folder and a list of passphrases. Stegosaur finds and recovers all secrets.
-- **Keyed file names.** Stegosaur names each new file like a camera photo, for example `IMG_482193.png`. The desktop and terminal apps do this for you. In the command line, use `stegosaur tag-name`. Only your passphrase can show which files are yours.
+- **Keyed file names.** Stegosaur names each new file like an ordinary one: a camera photo for an image (`IMG_482193.png`) or a recording for audio (`Voice 482193.wav`). The desktop and terminal apps do this for you. In the command line, use `stegosaur tag-name`. Only your passphrase can show which files are yours.
 - **JPEG support.** Stegosaur changes the compressed coefficients of the JPEG. It keeps a progressive JPEG progressive.
 - **Detectability check.** Stegosaur measures how easy it is to find your secret. The desktop app shows this before you save.
 
