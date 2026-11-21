@@ -36,15 +36,15 @@ All four programs use the same code. A file made by one program opens in the oth
 ### 1.2 Features
 
 - **One file, one passphrase.** Hide one file. Open it with one passphrase.
-- **Hidden layout.** Hide two files with two passphrases. Each passphrase opens only its own file. Unused space holds random data. A file with one secret, two secrets or no secret looks the same.
+- **Hidden layout.** Hide two files with two passphrases. Each passphrase opens only its own file.
 - **Split and join.** Split one secret into N shares. Hide each share in a different cover. Any K shares rebuild the secret. Fewer than K shares give no information.
 - **Cover text.** Turn a secret into text that reads like a log file or other plain English-like text.
 - **Bulk recovery.** Give Stegosaur a folder and a list of passphrases. Stegosaur finds and recovers all secrets.
-- **Many files at once.** Hide each file in its own cover. If you have fewer covers than files, Stegosaur uses the covers in turn. It copies a cover as many times as it needs. Stegosaur never changes the original cover.
-- **Extra room.** A cover can be too small for a file. Stegosaur then hides what fits in the picture or sound. It puts the rest in an encrypted block at the end of the new file. The picture or sound does not change because of this block. This works for PNG, BMP and WAV. Stegosaur writes the block in pieces of 1 MB, so a big file does not use a lot of memory.
-- **Original file names.** Stegosaur hides the name of your file with the file. When you recover the file, it has its own name again. For a file hidden without a name, Stegosaur finds the type from the first bytes of the file and gives it the correct extension.
-- **Stop.** Press **Stop** in the desktop app to end a job. Stegosaur does not leave a half-written file.
-- **Keyed file names.** Stegosaur names each new file like an ordinary one: a camera photo for an image (`IMG_482193.png`) or a recording for audio (`Voice 482193.wav`). The desktop and terminal apps do this for you. In the command line, use `stegosaur tag-name`. Only your passphrase can show which files are yours.
+- **Many files.** Hide each file in its own cover. With fewer covers than files, Stegosaur uses the covers again. It never changes the original cover.
+- **Extra room.** If a cover is too small, Stegosaur puts the rest of the data in an encrypted block at the end of the new file. This works for PNG, BMP and WAV.
+- **Original names.** Stegosaur keeps the name of the hidden file. A recovered file has its own name again.
+- **Stop.** Press **Stop** in the desktop app to end a job. No half-written file stays.
+- **Keyed file names.** Stegosaur names each new file like an ordinary one: a camera photo (`IMG_123456.png`) or a recording (`Voice 654321.wav`). In the command line, use `stegosaur tag-name`. 
 - **JPEG support.** Stegosaur changes the compressed coefficients of the JPEG. It keeps a progressive JPEG progressive.
 - **Detectability check.** Stegosaur measures how easy it is to find your secret. The desktop app shows this before you save.
 
@@ -66,7 +66,7 @@ A wrong passphrase gives the same result as a file with no secret. This is inten
 ### 2.1 Requirements
 
 - Rust 1.85 or later (install from <https://rustup.rs>)
-- Windows only, desktop app: Microsoft WebView2 (included in Windows 11)
+- Windows only, desktop app: Microsoft WebView2 
 
 ### 2.2 Build
 
@@ -95,13 +95,11 @@ The programs are in `target/release/`.
    ```
 
 2. Enter the passphrase when Stegosaur asks.
-3. If the file is bigger than the cover can hold, add `--extra-room`. The output must be a PNG, BMP or WAV file.
+3. If the cover is too small, add `--extra-room`. The output must be PNG, BMP or WAV.
 
    ```
-   stegosaur embed small.png out.png --data big-video.mp4 --extra-room
+   stegosaur embed small.png out.png --data big.mp4 --extra-room
    ```
-
-> **CAUTION:** Do not put the passphrase on the command line with `--pass`. Other users can see it in the process list. Set the variable `STEGOSAUR_PASS` instead.
 
 ### 3.2 Recover a file
 
@@ -109,7 +107,7 @@ The programs are in `target/release/`.
 stegosaur extract out.png --out recovered.pdf
 ```
 
-`extract` also reads the extra block, if the file has one. The desktop app and bulk recovery give each file its original name.
+`extract` also reads the extra block.
 
 ### 3.3 Hide two files with two passphrases
 
@@ -157,20 +155,19 @@ stegosaur analyze out.png
 
 1. Start `stegosaur-desktop`.
 2. Click a tab: **Hide**, **Reveal** or **Analyze**.
-3. Add files with the buttons above each list, or drop them on the list. You can also paste a list of paths, one on each line. In **Hide**, you can type a message instead of choosing a file.
-4. Set the passphrase and the options on the right.
-5. Click the button at the bottom. While a job runs, the same button says **Stop**.
+3. Add files with the buttons, or drop them on a list. In **Hide**, you can type a message instead.
+4. Enter the passphrase and set the options on the right.
+5. Click the button at the bottom. While a job runs, it says **Stop**.
 
-The layout follows from what you choose:
+Stegosaur chooses the layout from your files:
 
-| You choose | Stegosaur does |
-|---|---|
-| 1 file, 1 cover | Hides the file in the cover. |
-| 1 file, 2 or more covers | Splits the file. Use **Split** to set how many covers rebuild it. |
-| 2 or more files, 1 or more covers | Hides each file in its own cover. The covers repeat if there are fewer than files. |
-| A second secret | Hides two files in one cover. Each has its own passphrase. |
+| Files | Covers | Result |
+|---|---|---|
+| 1 | 1 | One file in one cover. |
+| 1 | 2 or more | The file is split across the covers. |
+| 2 or more | 1 or more | Each file goes in its own cover. Covers repeat if needed. |
 
-Click a column heading to sort a list. Click it again to reverse the order. Sorting changes only what you see.
+Click a column heading to sort a list. Click it again to reverse the order.
 
 ---
 
@@ -224,8 +221,8 @@ Differences that matter:
 - Nobody has audited Stegosaur from outside. Do not use it for data where a failure can cause harm.
 - Do not resize, re-save or convert a file that holds a secret. Many chat and photo services recompress images. A recompressed file loses the secret.
 - Do not lose the passphrase. Nobody can recover it.
-- Extra room makes the new file bigger than the cover. A tool that lists the parts of the file can see the extra block. The block looks like random data.
-- A file hidden with the current version has its name in front of the data. An older version of Stegosaur shows those bytes as part of the file.
+- Extra room makes the new file bigger. A tool that lists the parts of a file can see the extra block.
+- An older version of Stegosaur shows the stored file name as part of the file.
 - Use a cover that you never published. A public photo lets an attacker compare it with your file.
 - Bulk recovery cannot tell a file with no secret from a file with a secret and a missing passphrase.
 
