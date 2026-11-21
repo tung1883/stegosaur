@@ -90,7 +90,9 @@ fn the_picture_still_opens_and_holds_the_first_part() {
     let img = AnyCarrier::load(&out).unwrap();
     let head = extract_single(&img, b"pw", &cfg().to_config()).unwrap();
     assert!(head.len() < 150_000 && !head.is_empty());
-    assert_eq!(head, std::fs::read(&p).unwrap()[..head.len()]);
+    let at = stegosaur::app::wire::split(&head).1;
+    assert!(at > 0, "the name header is in the picture part");
+    assert_eq!(head[at..], std::fs::read(&p).unwrap()[..head.len() - at]);
     // the file grew by about the overflow, not by the whole payload twice
     let grown = std::fs::metadata(&out).unwrap().len() as usize;
     assert!(grown > 150_000 - head.len() && grown < 150_000 + 100_000);

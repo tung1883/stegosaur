@@ -272,8 +272,9 @@ fn run(cli: Cli) -> Result<()> {
         Cmd::Extract { carrier, out, pass, parity } => {
             let c = AnyCarrier::load(&carrier)?;
             let (bytes, keys) = stegosaur::container::extract_single_keys(&c, pass.as_bytes(), &Config { parity, ..Config::default() })?;
-            std::fs::write(&out, &bytes)?;
-            let mut total = bytes.len();
+            let at = stegosaur::app::wire::split(&bytes).1;
+            std::fs::write(&out, &bytes[at..])?;
+            let mut total = bytes.len() - at;
             let mut f = std::fs::OpenOptions::new().append(true).open(&out)?;
             if let Some(n) = stegosaur::overflow::read(&carrier, &keys, &mut f)? {
                 total += n as usize;
@@ -407,8 +408,9 @@ fn run(cli: Cli) -> Result<()> {
                 .filter_map(|p| AnyCarrier::load(p).ok())
                 .collect();
             let bytes = recover(pass.as_bytes(), &loaded, &Config { parity, ..Config::default() })?;
-            std::fs::write(&out, &bytes)?;
-            println!("recovered {} bytes from {} carriers", bytes.len(), loaded.len());
+            let at = stegosaur::app::wire::split(&bytes).1;
+            std::fs::write(&out, &bytes[at..])?;
+            println!("recovered {} bytes from {} carriers", bytes.len() - at, loaded.len());
         }
         Cmd::TextEmbed { data, pass, corpus, style, top_k, order, out } => {
             let m = model(style, &corpus, top_k, order)?;

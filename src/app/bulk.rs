@@ -103,10 +103,21 @@ fn is_text(p: &Path) -> bool {
 }
 
 /// Writes `data` to a new file next to `stem` in `dir`, never overwriting.
-fn write_new(dir: &Path, stem: &str, data: &[u8]) -> Result<PathBuf> {
+fn write_new(dir: &Path, stem: &str, stored: Option<&str>, data: &[u8]) -> Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
     for n in 0..1000 {
-        let name = if n == 0 { format!("{stem}.recovered.bin") } else { format!("{stem}.{n}.recovered.bin") };
+        let name = match stored {
+            // the file's own name; a number goes before the extension when that name is taken
+            Some(s) if n == 0 => s.to_string(),
+            Some(s) => match s.rfind('.').filter(|&i| i > 0) {
+                Some(i) => format!("{} ({}){}", &s[..i], n, &s[i..]),
+                None => format!("{s} ({n})"),
+            },
+            None => {
+                let ext = crate::app::sniff::extension(&data[..data.len().min(4096)]);
+                if n == 0 { format!("{stem}.recovered.{ext}") } else { format!("{stem}.{n}.recovered.{ext}") }
+            }
+        };
         let path = dir.join(name);
         match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(mut f) => {
@@ -140,7 +151,7 @@ fn look_at(file: &Path, opts: &BulkOptions) -> FileResult {
                         continue;
                     }
                     if let Ok(data) = crate::app::text::reveal(style, order, pass, &text, kdf) {
-                        if let Ok(path) = write_new(&opts.out_dir, &numbered(stem, &mut n), &data) {
+                        if let Ok(path) = write_new(&opts.out_dir, &numbered(stem, &mut n), None, &data) {
                             entry.found.push(Found::File { layout: "cover text", path, bytes: data.len(), pass_index: pi });
                         }
                     }
@@ -182,8 +193,8 @@ fn look_at(file: &Path, opts: &BulkOptions) -> FileResult {
                 if let Some(blob) = ShareBlob::decode(&raw) {
                     entry.found.push(Found::Share { set: hex(&blob.id), k: blob.k, n: blob.n, pass_index: pi });
                     shares.push((blob, file.to_path_buf()));
-                } else if let Ok(path) = write_new(&opts.out_dir, &numbered(stem, &mut idx_for_file), &raw) {
-                    let mut bytes = raw.len();
+                } else if let Ok(path) = write_new(&opts.out_dir, &numbered(stem, &mut idx_for_file), crate::app::wire::split(&raw).0.as_deref(), &raw[crate::app::wire::split(&raw).1..]) {
+                    let mut bytes = raw.len() - crate::app::wire::split(&raw).1;
                     if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(&path) {
                         match crate::overflow::read(file, &keys, &mut f) {
                             Ok(Some(n)) => bytes += n as usize,
@@ -202,8 +213,9 @@ fn look_at(file: &Path, opts: &BulkOptions) -> FileResult {
         }
         if !hit && try_hidden {
             if let Ok(data) = extract_deniable(&carrier, pass.as_bytes(), &cfg) {
-                if let Ok(path) = write_new(&opts.out_dir, &numbered(stem, &mut idx_for_file), &data) {
-                    entry.found.push(Found::File { layout: "two-passphrase layout", path, bytes: data.len(), pass_index: pi });
+                let (stored, at) = crate::app::wire::split(&data);
+                if let Ok(path) = write_new(&opts.out_dir, &numbered(stem, &mut idx_for_file), stored.as_deref(), &data[at..]) {
+                    entry.found.push(Found::File { layout: "two-passphrase layout", path, bytes: data.len() - at, pass_index: pi });
                 }
             }
         }
@@ -276,7 +288,10 @@ pub fn run(files: &[PathBuf], opts: &BulkOptions, progress: &mut dyn FnMut(usize
         distinct.dedup();
         let secret = combine_group(&blobs);
         let (output, bytes, missing) = match secret {
-            Some(s) => (write_new(&opts.out_dir, &format!("split_{}", &set[..6]), &s).ok(), s.len(), 0),
+            Some(s) => {
+                let (stored, at) = crate::app::wire::split(&s);
+                (write_new(&opts.out_dir, &format!("split_{}", &set[..6]), stored.as_deref(), &s[at..]).ok(), s.len() - at, 0)
+            }
             None => (None, 0, (k as usize).saturating_sub(distinct.len()).max(1)),
         };
         report.sets.push(BulkSet { set: set[..6].to_string(), k, n, found: distinct.len(), files: distinct, output, bytes, missing });

@@ -51,6 +51,21 @@ impl Payload {
         }
     }
 
+    /// The header that carries a file's name (typed text has no name, so no header).
+    fn prefix(&self) -> Vec<u8> {
+        match self {
+            Self::File(p) => crate::app::wire::header(p.file_name().and_then(|n| n.to_str()).unwrap_or("file")),
+            Self::Text(_) => Vec::new(),
+        }
+    }
+
+    /// The header followed by the content, ready to hide.
+    fn wire_read(&self) -> Result<Vec<u8>> {
+        let mut out = self.prefix();
+        out.extend_from_slice(&self.read()?);
+        Ok(out)
+    }
+
     fn len(&self) -> Result<u64> {
         match self {
             Self::File(p) => Ok(std::fs::metadata(p)?.len()),
@@ -201,21 +216,25 @@ fn load_for(cover: &Path, output: &Path) -> Result<AnyCarrier> {
 /// extra room is on, the pixels or samples take what they can and the rest is streamed into an encrypted
 /// block at the end of the output file. Returns the payload size and the measured report.
 fn hide_one(c: &mut AnyCarrier, payload: &Payload, pass: &Secret, cfg: &crate::container::Config, extra: bool, out: &Path) -> Result<(usize, Option<Report>)> {
-    let total = payload.len()?;
+    let prefix = payload.prefix();
+    let total = payload.len()? as usize + prefix.len();
     let cap = single_capacity(c, cfg);
-    if total as usize <= cap || !extra {
-        let data = payload.read()?;
+    if total <= cap || !extra {
+        let data = payload.wire_read()?;
         embed_single(c, pass.as_bytes(), &data, cfg)?;
         c.save(out)?;
-        return Ok((data.len(), report_of(c)));
+        return Ok((data.len() - prefix.len(), report_of(c)));
     }
     if !overflow::supports(&ext_of(out)) {
         return Err(Error::Invalid("this kind of file cannot take extra room; use a PNG, BMP or WAV cover, or a bigger one".into()));
     }
-    if cap == 0 {
+    if cap <= prefix.len() {
         return Err(Error::Invalid("this cover is too small even for extra room".into()));
     }
-    let (head, mut rest) = payload.split(cap)?;
+    let (body, mut rest) = payload.split(cap - prefix.len())?;
+    let mut head = prefix.clone();
+    head.extend_from_slice(&body);
+    drop(body);
     let keys = embed_single_keys(c, pass.as_bytes(), &head, cfg)?;
     drop(head);
     c.save(out)?;
@@ -223,7 +242,7 @@ fn hide_one(c: &mut AnyCarrier, payload: &Payload, pass: &Secret, cfg: &crate::c
         let _ = std::fs::remove_file(out);
         return Err(e);
     }
-    Ok((total as usize, report_of(c)))
+    Ok((total - prefix.len(), report_of(c)))
 }
 
 pub fn run_hide(spec: HideSpec, step: &mut dyn FnMut(&str)) -> Result<HideDone> {
@@ -239,7 +258,7 @@ pub fn run_hide(spec: HideSpec, step: &mut dyn FnMut(&str)) -> Result<HideDone> 
             let mut c = load_for(cover, &outs[0])?;
             step("Deriving the key and hiding the data"); crate::cancel::check()?;
             let (bytes, report) = if same {
-                let data = payload.read()?;
+                let data = payload.wire_read()?;
                 embed_deniable(&mut c, (spec.pass.as_bytes(), &data), None, &cfg)?;
                 step("Writing the new file"); crate::cancel::check()?;
                 c.save(&outs[0])?;
@@ -260,7 +279,7 @@ pub fn run_hide(spec: HideSpec, step: &mut dyn FnMut(&str)) -> Result<HideDone> 
             let outs = plan_outputs(&spec, &[(cover.as_path(), payload.stem())], Kind::Hidden, &inputs)?;
             step("Reading the cover"); crate::cancel::check()?;
             let mut c = load_for(cover, &outs[0])?;
-            let (a, b) = (payload.read()?, second.read()?);
+            let (a, b) = (payload.wire_read()?, second.wire_read()?);
             step("Deriving both keys and filling both slots"); crate::cancel::check()?;
             embed_deniable(&mut c, (spec.pass.as_bytes(), &a), Some((second_pass.as_bytes(), &b)), &cfg)?;
             step("Writing the new file"); crate::cancel::check()?;
@@ -280,7 +299,7 @@ pub fn run_hide(spec: HideSpec, step: &mut dyn FnMut(&str)) -> Result<HideDone> 
             for (c, o) in covers.iter().zip(&outs) {
                 loaded.push(load_for(c, o)?);
             }
-            let data = payload.read()?;
+            let data = payload.wire_read()?;
             step("Splitting the secret and hiding one piece in each cover"); crate::cancel::check()?;
             distribute(&data, spec.pass.as_bytes(), (*k).clamp(1, covers.len() as u8), &mut loaded, &cfg)?;
             step("Writing the new files"); crate::cancel::check()?;

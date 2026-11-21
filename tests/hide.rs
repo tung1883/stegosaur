@@ -29,6 +29,12 @@ fn spec(layout: Layout, pass: &str, naming: Naming) -> HideSpec {
     HideSpec { layout, pass: Secret::new(pass), cfg: cfg(), naming, out_dir: None, overwrite: false, extra: false }
 }
 
+/// What Reveal writes out: the recovered bytes without the file-name header.
+fn body(data: Vec<u8>) -> Vec<u8> {
+    let at = stegosaur::app::wire::split(&data).1;
+    data[at..].to_vec()
+}
+
 fn go(s: HideSpec) -> stegosaur::Result<stegosaur::app::hide::HideDone> {
     run_hide(s, &mut |_| {})
 }
@@ -88,8 +94,8 @@ fn two_secrets_in_one_cover_open_with_their_own_passphrases() {
     let done = go(spec(Layout::Two { payload: Payload::File(a), second: Payload::Text(Secret::new("second secret")), second_pass: Secret::new("pw two"), cover: c.clone() }, "pw one", Naming::Suffix)).unwrap();
     let _ = b;
     let out = AnyCarrier::load(done.items[0].output.as_ref().unwrap()).unwrap();
-    assert_eq!(extract_deniable(&out, b"pw one", &cfg().to_config()).unwrap(), b"first secret");
-    assert_eq!(extract_deniable(&out, b"pw two", &cfg().to_config()).unwrap(), b"second secret");
+    assert_eq!(body(extract_deniable(&out, b"pw one", &cfg().to_config()).unwrap()), b"first secret");
+    assert_eq!(body(extract_deniable(&out, b"pw two", &cfg().to_config()).unwrap()), b"second secret");
     assert!(extract_deniable(&out, b"pw three", &cfg().to_config()).is_err());
     // identical passphrases are refused
     let again = go(spec(Layout::Two { payload: Payload::Text(Secret::new("x")), second: Payload::Text(Secret::new("y")), second_pass: Secret::new("same"), cover: c }, "same", Naming::Suffix));
@@ -102,7 +108,7 @@ fn the_same_look_layout_holds_one_file() {
     let c = cover(d.path(), "c.png", 6);
     let done = go(spec(Layout::SameLook { payload: Payload::Text(Secret::new("quiet")), cover: c }, "pw", Naming::Ordinary)).unwrap();
     let out = AnyCarrier::load(done.items[0].output.as_ref().unwrap()).unwrap();
-    assert_eq!(extract_deniable(&out, b"pw", &cfg().to_config()).unwrap(), b"quiet");
+    assert_eq!(body(extract_deniable(&out, b"pw", &cfg().to_config()).unwrap()), b"quiet");
     let name = done.items[0].output.as_ref().unwrap().file_name().unwrap().to_str().unwrap().to_string();
     assert!(check_name(b"pw", &name, KdfParams::fast()).unwrap().contains(&Kind::Hidden));
 }
@@ -115,7 +121,7 @@ fn split_spreads_one_file_over_several_covers() {
     let done = go(spec(Layout::Split { payload: Payload::File(s), covers, k: 2 }, "pw", Naming::Ordinary)).unwrap();
     assert_eq!(done.items.len(), 3);
     let loaded: Vec<AnyCarrier> = done.items.iter().take(2).map(|i| AnyCarrier::load(i.output.as_ref().unwrap()).unwrap()).collect();
-    assert_eq!(recover(b"pw", &loaded, &cfg().to_config()).unwrap(), b"split me please");
+    assert_eq!(body(recover(b"pw", &loaded, &cfg().to_config()).unwrap()), b"split me please");
     let one: Vec<AnyCarrier> = done.items.iter().take(1).map(|i| AnyCarrier::load(i.output.as_ref().unwrap()).unwrap()).collect();
     assert!(recover(b"pw", &one, &cfg().to_config()).is_err());
 }
@@ -158,7 +164,56 @@ fn one_cover_can_be_used_for_every_file() {
     assert_ne!(outs[0], outs[1]);
     for (out, want) in outs.iter().zip([&b"first secret"[..], &b"second secret, a bit longer"[..]]) {
         let img = AnyCarrier::load(out).unwrap();
-        assert_eq!(extract_single(&img, b"pw", &cfg().to_config()).unwrap(), want);
+        assert_eq!(body(extract_single(&img, b"pw", &cfg().to_config()).unwrap()), want);
     }
     assert_eq!(std::fs::read(&c).unwrap(), before, "the cover itself is not changed");
+}
+
+#[test]
+fn the_original_file_name_comes_back_on_reveal() {
+    use stegosaur::app::bulk::{run as bulk_run, BulkOptions, Found};
+    let d = tempfile::tempdir().unwrap();
+    let c = cover(d.path(), "beach.png", 21);
+    let doc = file(d.path(), "holiday plans.pdf", b"%PDF-1.7 pretend pdf body");
+    let done = go(spec(Layout::Single { payload: Payload::File(doc.clone()), cover: c.clone() }, "pw", Naming::Suffix)).unwrap();
+    let out = done.items[0].output.clone().unwrap();
+    assert_eq!(done.items[0].bytes, 25, "the size reported is the file's, not the header's");
+    let found_dir = d.path().join("found");
+    let opts = BulkOptions { passes: vec![Secret::new("pw")], out_dir: found_dir.clone(), cfg: cfg(), names_only: false, text: None };
+    for round in 0..2 {
+        let rep = bulk_run(&[out.clone()], &opts, &mut |_, _, _| {}).unwrap();
+        let Found::File { path, bytes, .. } = &rep.entries[0].found[0] else { panic!("expected a file") };
+        assert_eq!(*bytes, 25);
+        let want = if round == 0 { "holiday plans.pdf" } else { "holiday plans (1).pdf" };
+        assert_eq!(path.file_name().unwrap().to_str().unwrap(), want);
+        assert_eq!(std::fs::read(path).unwrap(), b"%PDF-1.7 pretend pdf body");
+    }
+}
+
+#[test]
+fn files_hidden_without_a_name_header_still_open_with_a_guessed_extension() {
+    use stegosaur::app::bulk::{run as bulk_run, BulkOptions, Found};
+    use stegosaur::container::embed_single;
+    let d = tempfile::tempdir().unwrap();
+    let mut img = AnyCarrier::load(&cover(d.path(), "old.png", 22)).unwrap();
+    embed_single(&mut img, b"pw", b"%PDF-1.4 from an older version", &cfg().to_config()).unwrap();
+    let stego = d.path().join("old_stego.png");
+    img.save(&stego).unwrap();
+    let opts = BulkOptions { passes: vec![Secret::new("pw")], out_dir: d.path().join("found"), cfg: cfg(), names_only: false, text: None };
+    let rep = bulk_run(&[stego], &opts, &mut |_, _, _| {}).unwrap();
+    let Found::File { path, .. } = &rep.entries[0].found[0] else { panic!("expected a file") };
+    assert!(path.to_str().unwrap().ends_with(".recovered.pdf"), "{path:?}");
+}
+
+#[test]
+fn typed_text_has_no_name_and_comes_back_as_txt() {
+    use stegosaur::app::bulk::{run as bulk_run, BulkOptions, Found};
+    let d = tempfile::tempdir().unwrap();
+    let c = cover(d.path(), "beach.png", 23);
+    let done = go(spec(Layout::Single { payload: Payload::Text(Secret::new("meet at noon")), cover: c }, "pw", Naming::Suffix)).unwrap();
+    let opts = BulkOptions { passes: vec![Secret::new("pw")], out_dir: d.path().join("found"), cfg: cfg(), names_only: false, text: None };
+    let rep = bulk_run(&[done.items[0].output.clone().unwrap()], &opts, &mut |_, _, _| {}).unwrap();
+    let Found::File { path, .. } = &rep.entries[0].found[0] else { panic!("expected a file") };
+    assert!(path.to_str().unwrap().ends_with(".recovered.txt"), "{path:?}");
+    assert_eq!(std::fs::read(path).unwrap(), b"meet at noon");
 }

@@ -232,8 +232,9 @@ pub fn run(spec: JobSpec, emit: &mut dyn FnMut(JobEvent)) -> Result<JobResult> {
                 Err(e) => return Err(e),
             };
             step("Saving the recovered file"); crate::cancel::check()?;
-            std::fs::write(&output, &data)?;
-            let mut bytes = data.len();
+            let at = crate::app::wire::split(&data).1;
+            std::fs::write(&output, &data[at..])?;
+            let mut bytes = data.len() - at;
             if let Some(k) = keys {
                 let mut f = std::fs::OpenOptions::new().append(true).open(&output)?;
                 match crate::overflow::read(&carrier, &k, &mut f) {
@@ -259,8 +260,9 @@ pub fn run(spec: JobSpec, emit: &mut dyn FnMut(JobEvent)) -> Result<JobResult> {
             step("Collecting shares and rebuilding the secret"); crate::cancel::check()?;
             let data = recover(pass.as_bytes(), &loaded, &cfg.to_config())?;
             step("Saving the recovered file"); crate::cancel::check()?;
-            std::fs::write(&output, &data)?;
-            Ok(JobResult::Joined { output, bytes: data.len(), used: loaded.len() })
+            let at = crate::app::wire::split(&data).1;
+            std::fs::write(&output, &data[at..])?;
+            Ok(JobResult::Joined { output, bytes: data.len() - at, used: loaded.len() })
         }
         JobSpec::Hide(spec) => {
             let done = crate::app::hide::run_hide(spec, &mut |m| step(m))?;

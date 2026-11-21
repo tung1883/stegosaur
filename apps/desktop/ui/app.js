@@ -156,6 +156,9 @@ function pasteModal(onLines, o) {
 }
 
 // ---------------------------------------------------------------- the Hide plan
+// What a file takes inside the cover: its bytes plus the small header that carries its name (typed text has none).
+const ws = (f) => f.size + (f.typed ? 0 : 9 + new TextEncoder().encode(f.name).length);
+
 function plan() {
   const h = S.hide, N = h.payloads.length, M = h.covers.length;
   const out = { kind: null, problems: [], headline: '' };
@@ -203,28 +206,28 @@ async function doPreview() {
   try {
     let items = [];
     if (p.kind === 'single') {
-      let r = await api.preview({ op: 'embed', carrier: h.covers[0].path, payload_len: h.payloads[0].size, ...base, measure: true });
-      const extra = extraNeeded(o, h.covers[0].path, h.payloads[0].size, r);
+      let r = await api.preview({ op: 'embed', carrier: h.covers[0].path, payload_len: ws(h.payloads[0]), ...base, measure: true });
+      const extra = extraNeeded(o, h.covers[0].path, ws(h.payloads[0]), r);
       if (extra) r = await api.preview({ op: 'embed', carrier: h.covers[0].path, payload_len: r.capacity, ...base, measure: true });
       items = [{ cap: r.capacity, fits: r.fits || !!extra, fill: extra ? 1 : r.fill, extra, score: r.measured ? r.measured.after.score : null, note: r.detect_note, error: r.error }];
     } else if (p.kind === 'same' || p.kind === 'two') {
-      const r = await api.preview({ op: 'hidden', carrier: h.covers[0].path, payload_len: h.payloads[0].size, hidden_len: p.kind === 'two' && h.second.file ? h.second.file.size : null, ...base, measure: true });
-      const big = Math.max(h.payloads[0].size, p.kind === 'two' && h.second.file ? h.second.file.size : 0);
+      const r = await api.preview({ op: 'hidden', carrier: h.covers[0].path, payload_len: ws(h.payloads[0]), hidden_len: p.kind === 'two' && h.second.file ? ws(h.second.file) : null, ...base, measure: true });
+      const big = Math.max(ws(h.payloads[0]), p.kind === 'two' && h.second.file ? ws(h.second.file) : 0);
       items = [{ cap: r.capacity, fits: r.public_fits !== false && r.hidden_fits !== false, fill: r.capacity ? Math.min(1, big / r.capacity) : 1, score: r.measured ? r.measured.after.score : null, note: r.detect_note, error: r.error }];
     } else if (p.kind === 'split') {
-      const r = await api.preview({ op: 'split', carriers: h.covers.map((c) => c.path), secret_len: h.payloads[0].size, k: Math.min(h.k, h.covers.length), ...base });
+      const r = await api.preview({ op: 'split', carriers: h.covers.map((c) => c.path), secret_len: ws(h.payloads[0]), k: Math.min(h.k, h.covers.length), ...base });
       const sl = r.split ? r.split.share_len : 0;
       items = (r.split ? r.split.carriers : []).map((c) => ({ cap: c.capacity, fits: c.fits, fill: c.capacity ? Math.min(1, sl / c.capacity) : 1 }));
       if (r.error) items.length && (items[0].error = r.error);
     } else {
       const M = h.covers.length;
-      const biggest = h.covers.map((_, c) => h.payloads.reduce((m, f, j) => (j % M === c && (m < 0 || f.size > h.payloads[m].size) ? j : m), -1));
+      const biggest = h.covers.map((_, c) => h.payloads.reduce((m, f, j) => (j % M === c && (m < 0 || ws(f) > ws(h.payloads[m])) ? j : m), -1));
       for (let c = 0; c < M; c++) {
         const i = biggest[c];
         if (i < 0) { items.push({ cap: 0, fits: true, fill: 0, unused: true }); continue; }
-        const r = await api.preview({ op: 'embed', carrier: h.covers[c].path, payload_len: h.payloads[i].size, ...base, measure: false });
+        const r = await api.preview({ op: 'embed', carrier: h.covers[c].path, payload_len: ws(h.payloads[i]), ...base, measure: false });
         if (seq !== prevSeq) return;
-        const extra = extraNeeded(o, h.covers[c].path, h.payloads[i].size, r);
+        const extra = extraNeeded(o, h.covers[c].path, ws(h.payloads[i]), r);
         items.push({ cap: r.capacity, fits: r.fits || !!extra, fill: extra ? 1 : r.fill, extra, score: null, error: extra ? null : r.error });
       }
     }
@@ -330,7 +333,7 @@ function hidePanel() {
   let p = plan();
   if (h.second && !['single', 'two', 'same'].includes(p.kind) && !h.text) { h.second = null; p = plan(); }
   const pr = p.problems, items = (S.prev && S.prev.items) || [];
-  const totalNeed = p.kind === 'split' ? 0 : p.kind === 'bulk' ? h.covers.reduce((a, _, c) => a + Math.max(0, ...h.payloads.filter((__, j) => j % h.covers.length === c).map((f) => f.size)), 0) : items.length ? h.payloads.slice(0, items.length).reduce((a, f) => a + f.size, 0) : 0;
+  const totalNeed = p.kind === 'split' ? 0 : p.kind === 'bulk' ? h.covers.reduce((a, _, c) => a + Math.max(0, ...h.payloads.filter((__, j) => j % h.covers.length === c).map(ws)), 0) : items.length ? h.payloads.slice(0, items.length).reduce((a, f) => a + ws(f), 0) : 0;
   const totalCap = items.reduce((a, i) => a + i.cap + (i.extra || 0), 0);
   const worst = items.some((i) => i.score != null) ? Math.max(...items.filter((i) => i.score != null).map((i) => i.score)) : null;
   const layoutDesc = { split: 'Hide data in many pieces', bulk: 'Many files. Each one goes into its own cover.' }[h.layout] || (p.headline || 'Picks the layout from what you chose.');

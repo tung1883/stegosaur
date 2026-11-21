@@ -9,8 +9,10 @@ pub mod hide;
 pub mod jobs;
 pub mod preview;
 pub mod secret;
+pub mod sniff;
 pub mod text;
 pub mod views;
+pub mod wire;
 
 pub use config::AppConfig;
 pub use secret::Secret;

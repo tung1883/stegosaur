@@ -375,7 +375,7 @@ fn hide_job_covers_every_layout_through_json() {
     assert!(out.ends_with("one_1.png"), "{out}");
     let ev = run_json(&core, json!({"kind":"bulk","inputs":[out],"passes":["pw one"],"out_dir": s(&d.path().join("rec"))}));
     assert_eq!(last(&ev)["result"]["items"][0]["status"], "file", "{ev:?}");
-    assert_eq!(std::fs::read(d.path().join("rec").join("one_1.recovered.bin")).unwrap(), b"meet at noon");
+    assert_eq!(std::fs::read(d.path().join("rec").join("one_1.recovered.txt")).unwrap(), b"meet at noon");
 
     // two secrets in one cover
     let (a2, b2) = (file(d.path(), "a2.bin", &data(120, 1)), file(d.path(), "b2.bin", &data(100, 2)));
